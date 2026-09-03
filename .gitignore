@@ -1,0 +1,11 @@
+*.keystore
+*.jks
+*.p12
+*.pem
+local.properties
+android/**/.gradle/
+android/**/build/
+android/**/app/build/
+*.log
+*.tmp
+

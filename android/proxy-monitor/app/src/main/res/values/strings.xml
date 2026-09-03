@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Proxy Monitor</string>
+    <string name="widget_full_description">Proxy Monitor Full • fully resizable, scrollable expected active nodes, Monitor and PassWall2 tabs</string>
+    <string name="widget_compact_description">Proxy Monitor Compact 4×2 • connection control, best node and traffic</string>
+    <string name="router_url_hint">http://192.168.28.1/cgi-bin/proxy-monitor-mobile</string>
+    <string name="connection_channel_name">Persistent router connection</string>
+</resources>

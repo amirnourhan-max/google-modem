@@ -1,0 +1,14 @@
+<resources>
+    <color name="bg">#07101E</color>
+    <color name="panel">#111A2A</color>
+    <color name="panel2">#151F31</color>
+    <color name="border">#26344A</color>
+    <color name="text">#F8FAFC</color>
+    <color name="muted">#9DB0C9</color>
+    <color name="blue">#3B82F6</color>
+    <color name="cyan">#22D3EE</color>
+    <color name="green">#22C55E</color>
+    <color name="red">#EF4444</color>
+    <color name="orange">#F59E0B</color>
+    <color name="purple">#8B5CF6</color>
+</resources>
