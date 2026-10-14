@@ -37,7 +37,7 @@ jobs:
           sh -n openwrt/mobile-api/install-proxy-monitor-mobile-api-v7.sh
           sh -n openwrt/proxy-monitor/src/mobile.cgi
           sh -n openwrt/proxy-monitor/src/rpc-plugin.sh
-          python3 -m unittest discover -s tests/proxy-monitor -v
+          sudo env UCODE="$UCODE" LD_LIBRARY_PATH="$LD_LIBRARY_PATH" python3 -m unittest discover -s tests/proxy-monitor -v
       - name: Real browser testing with pinned Bootstrap theme
         run: |
           curl --fail --location https://raw.githubusercontent.com/openwrt/luci/d12d55376188343d790fa40377c084245a4d2b86/themes/luci-theme-bootstrap/htdocs/luci-static/bootstrap/cascade.css -o /tmp/bootstrap.css

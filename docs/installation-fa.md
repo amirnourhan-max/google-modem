@@ -1,61 +1,47 @@
-# راهنمای نصب فارسی
+# نصب و rollback نسخهٔ۱۵
 
-## 1. نصب پنل Proxy Monitor روی OpenWrt
+**Router deployment: NOT VERIFIED.** از Work مسیر SSH به192.168.28.1 وجود ندارد. نصب CLI و آزمایش fixture جای تأیید صفحهٔ واقعی روتر را نمی‌گیرند.
 
-فایل زیر را روی روتر، مثلاً داخل `/tmp`، کپی کنید:
+ابتدا داخل LAN سلامت اینترنت/DNS، SSH، Extreme Internet Resilience و LED را فقط‌خواندنی بررسی کنید. اگر baseline یا مدیریت سالم نیست، نصب را انجام ندهید. شاخهٔ موجود `proxy-monitor-luci-theme-lightweight-v15` را دریافت و HEAD را با SHA گزارش تحویل تطبیق دهید. ucode+fs، ubus، rpcd با exec-plugin و LuCI پیش‌نیازند؛ installer مستقل و آفلاین است.
 
-```text
-openwrt/proxy-monitor/install-proxy-monitor-v14.3.sh
+داخل clone در PowerShell:
+
+```powershell
+ssh root@192.168.28.1 "true"
+Get-FileHash .\openwrt\proxy-monitor\install-proxy-monitor-v15.sh -Algorithm SHA256
+scp -O .\openwrt\proxy-monitor\install-proxy-monitor-v15.sh root@192.168.28.1:/tmp/install-proxy-monitor-v15.sh
+ssh root@192.168.28.1 "sha256sum /tmp/install-proxy-monitor-v15.sh; sh -n /tmp/install-proxy-monitor-v15.sh"
 ```
 
-سپس از SSH اجرا کنید:
+هش روتر و محلی باید برابر باشند. host key را با fingerprint معتبر تطبیق دهید؛ StrictHostKeyChecking را غیرفعال نکنید. پس از تأیید baseline:
+
+```powershell
+ssh root@192.168.28.1 "sh /tmp/install-proxy-monitor-v15.sh"
+ssh root@192.168.28.1 "ubus call proxy-monitor status"
+ssh root@192.168.28.1 "test ! -e /usr/libexec/proxy-monitor-traffic"
+ssh root@192.168.28.1 "true"
+```
+
+installer ابتدا snapshot خصوصی با نام یکتا `/root/recovery/proxy-monitor-v15-XXXXXXXX` می‌سازد؛ compile/runtime/JSON checks پیش از نوشتن انجام می‌شوند. هر فایل با rename اتمیک جایگزین می‌شود. خطای میانی یا RPC موجب rollback می‌شود. فقط rpcd restart و cache LuCI refresh می‌شود؛ جلسهٔ LuCI ممکن است ورود مجدد بخواهد. proxy/DNS/watchdog/LED/wireless/network/firewall/uhttpd restart نمی‌شوند.
+
+صفحهٔ **Services → Proxy Monitor** را در تم واقعی Light/Dark، RTL و موبایل بررسی کنید. Status Overview نباید duplicate داشته باشد. درخواست وضعیت حدود هر۳۰ثانیه و تنها در تب visible است؛ درخواست درحال اجرا ممکن است بعد از مخفی‌شدن تکمیل شود. حذف includeهای00 و75 را بررسی و سلامت شبکه/SSH را دوباره تأیید کنید.
+
+## موبایل
+
+API موجود خودکار به v7 مهاجرت می‌کند. اگر وجود ندارد، ایجاد اختیاری:
+
+```powershell
+ssh root@192.168.28.1 "sh /tmp/install-proxy-monitor-v15.sh --mobile-api"
+```
+
+companion v7 نیز باید کنار installer v15 باشد. token۲۵۶بیتی در `/etc/proxy-monitor/mobile-token` با permission0600 است؛ installer آن را چاپ نمی‌کند. در ترمینال محلی امن بخوانید و URL اپ را به `http://192.168.28.1/cgi-bin/proxy-monitor-mobile?token=<توکن محلی>` تغییر دهید. HTTPS موجود ترجیح دارد. token را در chat/log/GitHub ذخیره نکنید. بدون token باید403 و با token پاسخ API7 و traffic.available=false دریافت شود. Refresh واقعی اپ/ویجت2.11 را آزمایش کنید؛ محدودیت‌های intentional در compatibility.md آمده‌اند.
+
+## بازگشت
+
+مسیر دقیق snapshot در خروجی نصب است:
 
 ```sh
-chmod +x /tmp/install-proxy-monitor-v14.3.sh
-/tmp/install-proxy-monitor-v14.3.sh
+sh /root/recovery/proxy-monitor-v15-XXXXXXXX/rollback.sh
 ```
 
-بعد از نصب، صفحه LuCI را Refresh کنید و از مسیر Status، پنل Proxy Monitor را ببینید.
-
-## 2. نصب API موبایل
-
-فایل زیر را روی روتر کپی کنید:
-
-```text
-openwrt/mobile-api/install-proxy-monitor-mobile-api-v6-manual-refresh.sh
-```
-
-سپس اجرا کنید:
-
-```sh
-chmod +x /tmp/install-proxy-monitor-mobile-api-v6-manual-refresh.sh
-/tmp/install-proxy-monitor-mobile-api-v6-manual-refresh.sh
-```
-
-خروجی نصب، آدرس API و مقدار موردنیاز برای اتصال برنامه Android را نمایش می‌دهد.
-
-## 3. نصب برنامه Android
-
-آخرین APK آماده:
-
-```text
-releases/ProxyMonitorAndroid-v2.11.apk
-```
-
-APK را روی نسخه قبلی نصب کنید و برنامه را حذف نکنید تا تنظیمات باقی بماند.
-
-## 4. اصلاح خطای ذخیره Subscription در PassWall2
-
-اگر هنگام افزودن یا ذخیره Subscription خطای `node_subscribe_config.lua` دیدید، فایل زیر را روی روتر اجرا کنید:
-
-```sh
-chmod +x /tmp/fix-passwall2-subscribe-set.sh
-/tmp/fix-passwall2-subscribe-set.sh
-```
-
-برای بازگردانی:
-
-```sh
-/tmp/fix-passwall2-subscribe-set.sh uninstall
-```
-
+نام واقعی backup را جایگزین کنید. snapshot منتخب فایل‌ها/permissions قبلی و API/collector را برمی‌گرداند و فایل‌های تازه را حذف می‌کند؛ فقط rpcd refresh می‌شود. backup در نصب مجدد بازنویسی نمی‌شود. rollback نیز lock نصب را رعایت می‌کند. قطع برق/SIGKILL ممکن است مانع rollback خودکار شود؛ اسکریپت باقی می‌ماند. اگر lock مانده، ابتدا محلی نبودن عملیات نصب/rollback را تأیید و سپس فقط directory خالی lock را rmdir کنید. v14.3 یا API6 را کورکورانه روی v15 اجرا نکنید.
