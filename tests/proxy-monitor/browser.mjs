@@ -69,10 +69,12 @@ try {
   });assert(collapsed);
   await page.locator('#proxy-monitor button').first().click();
   const beforeExit=await page.evaluate(()=>exitRequests);
+  assert.equal(beforeExit,0,'status/manual status/hidden/collapsed refreshes must not check an external IP');
   await page.locator('#proxy-monitor-exit button').click();
   assert.equal(await page.evaluate(()=>exitRequests),beforeExit+1);
   assert((await page.locator('#proxy-monitor-exit').innerText()).includes('2606:4700:4700::1111'));
-  report.push({width,dark,result,colors,hidden,collapsed,throttle});
+  report.push({width,dark,result,colors,hidden,collapsed,throttle,configuredNodes:3,countryFlags:true,countryInferenceLabel:true,
+   automaticExitChecks:beforeExit,manualExitRefresh:true,manualIpv6Result:true});
   await page.close();
  }
  // Undefined color tokens: inherited theme text remains readable.
@@ -88,5 +90,5 @@ try {
  await fallback.screenshot({path:'test-results/fallback-no-tokens-360-rtl.png',fullPage:true});
  await fallback.close();
  writeFileSync('test-results/browser-report.json',JSON.stringify(report,null,2));
- console.log('PASS: 6 native Bootstrap light/dark/RTL Overview layouts; before System; 30s request gate; hidden/collapsed suspension; fallback; partial JSON; contrast ≥4.5');
+ console.log('PASS: 6 native Bootstrap light/dark/RTL Overview layouts; node flags/inference/groups; manual IPv6 exit refresh; zero automatic exit checks; before System; 30s request gate; hidden/collapsed suspension; fallback; partial JSON; contrast ≥4.5');
 } finally { await browser.close(); server.close(); }

@@ -53,4 +53,6 @@ installer خودکفا همهٔ فایل‌های جدید، ACL و کش موج�
 
 در بازبینی مستقل، خطر fallback مستقیم Balancer بدون عضو، اختلاف قواعد OR خالی، تشخیص auto-switch و dependency اختیاری پیدا و با آزمون رگرسیون اصلاح شد.
 
+اعتبارسنجی پیاده‌سازی در [CI38631563055](https://github.com/amirnourhan-max/google-modem/actions/runs/38631563055) روی commit `2f621d09d95d22c2a81f6cb4c43b986644109321` موفق شد: **۴۹ آزمون بدون skip**، build و اجرای daemonهای واقعی، پاسخ deferred بدون مسدودشدن session/status، شبکهٔ curl/TLS/SOCKS5h واقعی و شش چیدمان Chromium. محلی۴۶ آزمون موفق و۳ آزمون daemon یونیکس به علت محدودیت محیط skipped بودند؛ آن سه در CI اجرا شدند. تصاویر جدید در `tests/proxy-monitor/evidence/` از ZIP با SHA256 `2ba1a8c251a842e2ba999c5044d82353a136e9e9ab8d8231a49e14dcb06cb2fd` بازیابی، صحت‌سنجی و بصری بررسی شدند. contrast در Light حدود۱۰٫۳۷ و Dark حدود۸٫۶۵ و opacity نهایی۱ است. هر دو کارت قبل از System، بدون overflow، با حفظ RTL/LTR و پرچم‌های محلی دیده می‌شوند. این نتیجهٔ fixture توسعه است؛ نصب روتر یا Refresh واقعی گوشی را اثبات نمی‌کند.
+
 منابع قراردادها: [curl](https://curl.se/docs/manpage.html)، [ipify](https://www.ipify.org/)، [ipwho.is](https://ipwhois.io/documentation)، source اصلی Passwall2 در adapter بررسی‌شده. API geolocation سرویس خارجی بدون SLA است؛ خرابی/تغییر schema آن تنها کشور را UNKNOWN می‌کند.
