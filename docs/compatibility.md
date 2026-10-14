@@ -2,11 +2,12 @@
 
 | بخش | قرارداد | محدودیت |
 |---|---|---|
-| Passwall2 | rpcd UCI؛ `global.node` سپس alias `tcp_node`؛ enabled و procd جدا | schema ناشناخته به UNKNOWN می‌رسد |
+| Passwall2 | خواندن native UCI با cursor؛ `global.node` سپس alias `tcp_node`؛ enabled و procd جدا | schema ناشناخته به UNKNOWN می‌رسد؛ ucode-mod-uci لازم است |
 | Shunt | `_shunt`، `default_node`، `Iran` و `PrivateIP` | configured routing است؛ قانون با شناسهٔ سفارشی UNKNOWN است |
 | Balancer | `_balancing`، `balancingStrategy/strategy` | نود دقیق فعال قابل مشاهده نیست |
 | Xray / sing-box | نام پردازش و executable discovery؛ `global_app.xray_file/sing_box_file` | binary اجرا نمی‌شود؛ basename سفارشی نیز جست‌وجو می‌شود |
-| LuCI | view/rpc/poll، section/button و scoped CSS | CSS رسمی Bootstrap با fallback؛ تم واقعی روتر نیازمند مشاهدهٔ محلی است |
+| LuCI | baseclass include استاندارد `view/status/include/00_proxy-monitor.js`؛ section/button و scoped CSS | قبل از `10_system.js`؛ Overview صاحب polling است و مانیتور درخواست را۳۰ثانیه throttle می‌کند |
+| RPC | native script `/usr/share/rpcd/ucode/proxy-monitor`، object صریح `proxy-monitor.status` | rpcd-mod-ucode لازم است؛ بررسی صرف shell list کافی نیست؛ پاسخ revision2 پس از restart انتظار می‌رود |
 
 هیچ وابستگی به JSON موقت engine، PID ثابت یا تغییر فایل‌های متعلق به Passwall2/core وجود ندارد. تغییرهای breaking ناشناخته تضمین نمی‌شوند.
 

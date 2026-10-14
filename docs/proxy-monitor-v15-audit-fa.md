@@ -1,4 +1,6 @@
-# گزارش ممیزی Proxy Monitor v15
+# گزارش تاریخی ممیزی Proxy Monitor v15 اولیه
+
+این گزارش شواهد نسخهٔ پیش از شکست واقعی RPC روی روتر را ثبت می‌کند؛ CI قبلی loader واقعی را اجرا نمی‌کرد. وضعیت و معماری فعلی در [گزارش تعمیر RPC/Overview](proxy-monitor-v15-rpc-overview-repair-fa.md) است. کد جدید از native ucode loader، UCI مستقیم و include استاندارد Overview استفاده می‌کند. اعداد benchmark و آزمون‌های زیر تاریخی‌اند و تأیید نصب دستگاه محسوب نمی‌شوند.
 
 **مبدأ:** شاخهٔ موجود proxy-monitor-luci-theme-lightweight-v15 با HEAD واقعی `b0064f64bfa047d66826b6ba813c9e79df7351f7`. v14.3 و API6 و سورس/APK اندروید2.11 حفظ شدند؛ main تغییر نکرد و PR merge نمی‌شود.
 

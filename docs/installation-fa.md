@@ -2,7 +2,7 @@
 
 **Router deployment: NOT VERIFIED.** از Work مسیر SSH به192.168.28.1 وجود ندارد. نصب CLI و آزمایش fixture جای تأیید صفحهٔ واقعی روتر را نمی‌گیرند.
 
-ابتدا داخل LAN سلامت اینترنت/DNS، SSH، Extreme Internet Resilience و LED را فقط‌خواندنی بررسی کنید. اگر baseline یا مدیریت سالم نیست، نصب را انجام ندهید. شاخهٔ موجود `proxy-monitor-luci-theme-lightweight-v15` را دریافت و HEAD را با SHA گزارش تحویل تطبیق دهید. ucode+fs، ubus، rpcd با exec-plugin و LuCI پیش‌نیازند؛ installer مستقل و آفلاین است.
+ابتدا داخل LAN سلامت اینترنت/DNS، SSH، Extreme Internet Resilience و LED را فقط‌خواندنی بررسی کنید. اگر baseline یا مدیریت سالم نیست، نصب را انجام ندهید. شاخهٔ موجود `proxy-monitor-luci-theme-lightweight-v15` را دریافت و HEAD را با SHA گزارش تحویل تطبیق دهید. ucode+fs+uci، ubus، rpcd-mod-ucode و LuCI Overview پیش‌نیازند؛ installer مستقل و آفلاین است. در نبود module، نصب پیش از تغییر فایل‌ها متوقف می‌شود و package خودکار نصب نمی‌کند.
 
 داخل clone در PowerShell:
 
@@ -15,7 +15,7 @@ ssh root@192.168.28.1 "sha256sum /tmp/install-proxy-monitor-v15.sh; sh -n /tmp/i
 
 هش روتر و محلی باید برابر باشند. host key را با fingerprint معتبر تطبیق دهید؛ StrictHostKeyChecking را غیرفعال نکنید. پس از تأیید baseline:
 
-SHA256 نصب‌کنندهٔ آزموده‌شده: `2f4e18b4e88995c583d3c1fdc80294444d0af1e87bb5966ad7bd3ed5704d04d3`.
+SHA256 نصب‌کنندهٔ اصلاح‌شده: `cb4404f5556276f86ca20c5408839b027b37b916278d2ec04f6483c1e95e4231`.
 
 ```powershell
 ssh root@192.168.28.1 "sh /tmp/install-proxy-monitor-v15.sh"
@@ -26,7 +26,9 @@ ssh root@192.168.28.1 "true"
 
 installer ابتدا snapshot خصوصی با نام یکتا `/root/recovery/proxy-monitor-v15-XXXXXXXX` می‌سازد؛ compile/runtime/JSON checks پیش از نوشتن انجام می‌شوند. هر فایل با rename اتمیک جایگزین می‌شود. خطای میانی یا RPC موجب rollback می‌شود. فقط rpcd restart و cache LuCI refresh می‌شود؛ جلسهٔ LuCI ممکن است ورود مجدد بخواهد. proxy/DNS/watchdog/LED/wireless/network/firewall/uhttpd restart نمی‌شوند.
 
-صفحهٔ **Services → Proxy Monitor** را در تم واقعی Light/Dark، RTL و موبایل بررسی کنید. Status Overview نباید duplicate داشته باشد. درخواست وضعیت حدود هر۳۰ثانیه و تنها در تب visible است؛ درخواست درحال اجرا ممکن است بعد از مخفی‌شدن تکمیل شود. حذف includeهای00 و75 را بررسی و سلامت شبکه/SSH را دوباره تأیید کنید.
+صفحهٔ **Status → Overview** را در تم واقعی Light/Dark، RTL و موبایل بررسی کنید؛ Proxy Monitor باید **بالای System** باشد و فقط include00 جدید وجود داشته باشد. include75 و منوی Services قبلی حذف می‌شوند؛ هیچ core file LuCI تغییر نمی‌کند. Overview ممکن است سایر بخش‌ها را با چرخهٔ سریع‌تر بخواند؛ درخواست RPC خود مانیتور حدود۳۰ثانیه و تنها در تب visible و بخش باز است. درخواست درحال اجرا ممکن است بعد از مخفی‌شدن تکمیل شود. پاسخ RPC باید `rpc_backend:ucode` و `rpc_revision:2` داشته باشد. سلامت شبکه/SSH را دوباره تأیید کنید.
+
+خطای قبلی `Not found` در installer بلافاصله بعد از restart بررسی می‌شد؛ نسخهٔ جدید حداکثر۱۰ تلاش با timeout۲ثانیه و فاصله۱ثانیه دارد. این انتظار فقط هنگام نصب است و loop دائمی نیست. اگر ثبت/پاسخ native واقعاً شکست بخورد، snapshot بازمی‌گردد. بعد از rollback نبود object طبیعی است؛ نتیجهٔ مستقیم script.list اثبات ثبت آن در daemon نیست.
 
 ## موبایل
 

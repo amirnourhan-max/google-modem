@@ -37,7 +37,9 @@ sh /tmp/install-proxy-monitor-v15.sh
 sh /tmp/fix-passwall2-subscribe-set.sh
 ```
 
-نسخهٔ ۱۵ در **Services → Proxy Monitor** است. ترافیک یا probe مستقل ندارد و در صفحهٔ visible هر۳۰ثانیه وضعیت را می‌خواند. API موجود پیش از حذف collector به v7 مهاجرت می‌کند. v7 توکن می‌خواهد؛ URL اندروید را به‌روز کنید. اگر API موجود نیست، ایجاد آن با `--mobile-api` اختیاری است.
+نسخهٔ اصلاح‌شدهٔ ۱۵ در **Status → Overview، بالای System** است و از include استاندارد `00_proxy-monitor.js` استفاده می‌کند؛ فایل core LuCI تغییر نمی‌کند و منوی Services جدا حذف شده است. ترافیک یا probe مستقل ندارد؛ Overview چرخهٔ polling را اداره می‌کند و خود مانیتور RPC را حدود هر۳۰ثانیه فقط هنگام visible و بازبودن بخش می‌خواند. API موجود پیش از حذف collector به v7 مهاجرت می‌کند. v7 توکن می‌خواهد؛ اگر API موجود نیست، ایجاد آن با `--mobile-api` اختیاری است.
+
+ثبت RPC اکنون از loader بومی `rpcd-mod-ucode` با object صریح `proxy-monitor.status` انجام می‌شود. installer بعد از restart به‌صورت محدود منتظر پاسخ **پلاگین جدید** می‌ماند؛ نبود RPC همچنان به rollback واقعی منجر می‌شود. [گزارش تعمیر RPC و Overview](docs/proxy-monitor-v15-rpc-overview-repair-fa.md).
 
 [راهنمای نصب و rollback](docs/installation-fa.md)، [استقرار با Codex محلی](docs/deployment-local-codex-fa.md)، [گزارش ممیزی](docs/proxy-monitor-v15-audit-fa.md). **نصب روتر از Work تأیید نشده است.**
 
