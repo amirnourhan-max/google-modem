@@ -384,8 +384,7 @@ UCODE
 
 chmod 0755 "$HELPER"
 
-# v14.4 no traffic collector.
-rm -f "$TRAFFIC"
+# No traffic sampler in LuCI. Preserve the on-demand helper used by the unchanged Android app.
 
 mkdir -p /usr/share/rpcd/acl.d
 cat > "$ACL" <<'JSON'
