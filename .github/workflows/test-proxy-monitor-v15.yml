@@ -17,19 +17,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Build real ucode runtime
+      - name: Build real ubusd, rpcd, UCI and ucode runtime
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y cmake libjson-c-dev pkg-config
-          git clone https://github.com/jow-/ucode.git /tmp/ucode-src
-          git -C /tmp/ucode-src checkout fa288dd9b827045265900d0d25f9d834ffd755bf
-          cmake -S /tmp/ucode-src -B /tmp/ucode-build -DCMAKE_INSTALL_PREFIX=/tmp/ucode-runtime -DUBUS_SUPPORT=OFF -DUCI_SUPPORT=OFF -DRTNL_SUPPORT=OFF -DNL80211_SUPPORT=OFF -DULOOP_SUPPORT=OFF -DZLIB_SUPPORT=OFF -DDIGEST_SUPPORT=OFF -DFFI_SUPPORT=OFF
-          cmake --build /tmp/ucode-build -j2
-          cmake --install /tmp/ucode-build
+          sudo apt-get install -y cmake libjson-c-dev pkg-config libcrypt-dev
+          sh tests/proxy-monitor/build-real-runtime.sh /tmp/pm-native-runtime /tmp/pm-native-build
       - name: Shell, generation, runtime, installation, rollback and API tests
         env:
-          UCODE: /tmp/ucode-runtime/bin/ucode
-          LD_LIBRARY_PATH: /tmp/ucode-runtime/lib
+          UCODE: /tmp/pm-native-runtime/bin/ucode
+          PM_RPCD_PREFIX: /tmp/pm-native-runtime
+          LD_LIBRARY_PATH: /tmp/pm-native-runtime/lib
         run: |
           python3 openwrt/proxy-monitor/build-installer.py
           git diff --exit-code -- openwrt/proxy-monitor/install-proxy-monitor-v15.sh
@@ -37,7 +34,7 @@ jobs:
           sh -n openwrt/mobile-api/install-proxy-monitor-mobile-api-v7.sh
           sh -n openwrt/proxy-monitor/src/mobile.cgi
           sh -n openwrt/proxy-monitor/src/rpc-plugin.sh
-          sudo env UCODE="$UCODE" LD_LIBRARY_PATH="$LD_LIBRARY_PATH" python3 -m unittest discover -s tests/proxy-monitor -v
+          sudo env UCODE="$UCODE" PM_RPCD_PREFIX="$PM_RPCD_PREFIX" LD_LIBRARY_PATH="$LD_LIBRARY_PATH" python3 -m unittest discover -s tests/proxy-monitor -v
       - name: Real browser testing with pinned Bootstrap theme
         run: |
           curl --fail --location https://raw.githubusercontent.com/openwrt/luci/d12d55376188343d790fa40377c084245a4d2b86/themes/luci-theme-bootstrap/htdocs/luci-static/bootstrap/cascade.css -o /tmp/bootstrap.css

@@ -8,7 +8,8 @@ umask 077
 case "${1:-}" in ''|--mobile-api) ;; *) echo 'Usage: installer [--mobile-api]'; exit 1 ;; esac
 command -v ucode >/dev/null || { echo 'ERROR: ucode missing'; exit 1; }
 [ -x /bin/ubus ] && [ -x /etc/init.d/rpcd ] || { echo 'ERROR: rpcd/ubus missing'; exit 1; }
-ucode -e "import * as fs from 'fs'; exit(fs.stat('/') ? 0 : 1);"
+[ -r /usr/lib/rpcd/ucode.so ] || { echo 'ERROR: rpcd-mod-ucode missing; no changes made'; exit 1; }
+ucode -e "import * as fs from 'fs'; import { cursor } from 'uci'; let c=cursor(); exit(fs.stat('/') ? 0 : 1);"
 LOCK=/tmp/proxy-monitor-v15-install.lock
 check_parents() {
     d=$(dirname "$1")
@@ -40,13 +41,14 @@ B=$(mktemp -d /root/recovery/proxy-monitor-v15-XXXXXXXX)
 mkdir -p "$B/originals" "$B/stage"
 cat > "$B/manifest" <<'MANIFEST'
 /usr/libexec/proxy-monitor-status
-/www/luci-static/resources/view/services/proxy-monitor.js
-/usr/libexec/rpcd/proxy-monitor
-/usr/share/luci/menu.d/luci-app-proxy-monitor.json
+/www/luci-static/resources/view/status/include/00_proxy-monitor.js
+/usr/share/rpcd/ucode/proxy-monitor
 /usr/share/rpcd/acl.d/luci-app-proxy-monitor.json
 /www/cgi-bin/proxy-monitor-mobile
 /etc/proxy-monitor/mobile-token
-/www/luci-static/resources/view/status/include/00_proxy-monitor.js
+/usr/libexec/rpcd/proxy-monitor
+/www/luci-static/resources/view/services/proxy-monitor.js
+/usr/share/luci/menu.d/luci-app-proxy-monitor.json
 /www/luci-static/resources/view/status/include/75_proxy-monitor.js
 /usr/libexec/proxy-monitor-traffic
 MANIFEST
@@ -102,6 +104,7 @@ cat > "$B/stage/usr/libexec/proxy-monitor-status" <<'UCODE'
 #!/usr/bin/ucode
 'use strict';
 import * as fs from 'fs';
+import { cursor } from 'uci';
 
 // Only fixed local commands. UCI values are never shell arguments.
 function command(cmd) {
@@ -136,9 +139,14 @@ function number(s) {
     return type(s) == 'string' && match(s, /^[0-9]{1,8}$/) ? int(s) : null;
 }
 
-// Stable rpcd UCI interface, no generated engine configuration or subscription reads.
-let conf = object(command("/bin/ubus call uci get '{\"config\":\"passwall2\"}' 2>/dev/null"));
-let values = type(conf.values) == 'object' ? conf.values : {};
+// Native read-only UCI. Calling uci.get over ubus from a synchronous rpcd
+// ucode callback would recurse into the same daemon and can deadlock.
+let values = {};
+let ctx = cursor();
+try { values = ctx.get_all('passwall2') || {}; }
+catch (e) { values = {}; }
+ctx.unload('passwall2');
+if (type(values) != 'object') values = {};
 let global = {};
 let apps = {};
 for (let key, val in values)
@@ -177,7 +185,9 @@ function installed(name, custom) {
         if (fs.access(dir + name, 'x')) return true;
     return false;
 }
-let services = object(command('/bin/ubus call service list 2>/dev/null'));
+// Native rpcd callbacks are synchronous; bound the other-daemon request so
+// unavailable procd cannot stall LuCI for the CLI's default 30-second timeout.
+let services = object(command('/bin/ubus -t 1 call service list 2>/dev/null'));
 function service_running(name) {
     if (type(services[name]) != 'object' || type(services[name].instances) != 'object') return null;
     let observed = 0;
@@ -239,18 +249,23 @@ if (ARGV[0] == '--mobile')
 else printf('%J\n', result);
 UCODE
 chmod 0755 "$B/stage/usr/libexec/proxy-monitor-status"
-mkdir -p "$B/stage/www/luci-static/resources/view/services"
-cat > "$B/stage/www/luci-static/resources/view/services/proxy-monitor.js" <<'LUCIJS'
+mkdir -p "$B/stage/www/luci-static/resources/view/status/include"
+cat > "$B/stage/www/luci-static/resources/view/status/include/00_proxy-monitor.js" <<'LUCIJS'
 'use strict';
-'require view';
+'require baseclass';
 'require rpc';
-'require poll';
 
 var callStatus = rpc.declare({ object: 'proxy-monitor', method: 'status', expect: { '': {} } });
-function fetchStatus() {
-    return callStatus().then(function(d) {
+var cachedStatus = {}, lastRefresh = -Infinity, inFlight = null;
+function fetchStatus(force) {
+    if (inFlight) return inFlight;
+    if (!force && Date.now() - lastRefresh < 30000) return Promise.resolve(cachedStatus);
+    inFlight = callStatus().then(function(d) {
         return d && !Array.isArray(d) && typeof d === 'object' && d.backend_version === 15 ? d : {};
-    }).catch(function() { return {}; });
+    }).catch(function() { return {}; }).then(function(d) {
+        cachedStatus = d; lastRefresh = Date.now(); return d;
+    }).finally(function() { inFlight = null; });
+    return inFlight;
 }
 function state(value, yes, no) {
     return E('span', { 'class': 'pm-badge' }, [
@@ -321,68 +336,72 @@ function panel(d) {
         ])
     ]);
 }
-return view.extend({
-    load: fetchStatus,
+return baseclass.extend({
+    title: _('Proxy Monitor'),
+    load: function() {
+        if (document.hidden || this.hide) return Promise.resolve(cachedStatus);
+        return fetchStatus(false);
+    },
     render: function(d) {
         installStyles();
-        var inFlight = null;
+        // Overview owns polling/rendering. Return the same DOM root to avoid
+        // duplicate handlers, timers and widget IDs on its frequent ticks.
+        if (this.content) { this.update(d); return this.content; }
+        var self = this;
+        this.lastData = d;
         var body = E('div', { 'id': 'proxy-monitor-panel' }, [panel(d)]);
         var content = E('div', { 'id': 'proxy-monitor' }, [
-            E('div', { 'class': 'pm-header' }, [E('h2', {}, [_('Proxy Monitor')]),
+            E('div', { 'class': 'pm-header' }, [
                 E('button', { 'type': 'button', 'class': 'cbi-button cbi-button-action', 'click': function() { return refresh(); } }, [_('Refresh status')])]),
             body,
             E('p', { 'class': 'pm-help' }, [_('Local read-only indicators; configuration and process presence do not prove connectivity. Shared health is published by the existing watchdog. No traffic sampling or connectivity probes. Automatic refresh: 30 seconds while visible.')])
         ]);
-        function refresh() {
-            if (inFlight) return inFlight;
-            inFlight = fetchStatus().then(function(result) {
-                while (body.firstChild) body.removeChild(body.firstChild);
-                body.appendChild(panel(result));
-            }).finally(function() { inFlight = null; });
-            return inFlight;
-        }
-        var tick = function() {
-            if (!document.body.contains(content)) { poll.remove(tick); return Promise.resolve(); }
-            if (document.hidden) return Promise.resolve();
-            return refresh();
+        this.update = function(result) {
+            if (self.lastData === result) return;
+            self.lastData = result;
+            while (body.firstChild) body.removeChild(body.firstChild);
+            body.appendChild(panel(result));
         };
-        poll.add(tick, 30);
+        function refresh() {
+            return fetchStatus(true).then(function(result) { self.update(result); });
+        }
+        this.content = content;
         return content;
-    },
-    handleSaveApply: null, handleSave: null, handleReset: null
+    }
 });
 LUCIJS
-chmod 0644 "$B/stage/www/luci-static/resources/view/services/proxy-monitor.js"
-mkdir -p "$B/stage/usr/libexec/rpcd"
-cat > "$B/stage/usr/libexec/rpcd/proxy-monitor" <<'RPCPLUGIN'
-#!/bin/sh
-# Dedicated read-only rpcd object. No file.exec permission or user command input.
-case "${1:-}" in
-    list) printf '%s\n' '{"status":{}}' ;;
-    call) [ "${2:-}" = status ] || exit 1; exec /usr/libexec/proxy-monitor-status ;;
-    *) exit 1 ;;
-esac
-RPCPLUGIN
-chmod 0755 "$B/stage/usr/libexec/rpcd/proxy-monitor"
-mkdir -p "$B/stage/usr/share/luci/menu.d"
-cat > "$B/stage/usr/share/luci/menu.d/luci-app-proxy-monitor.json" <<'JSONMENU'
-{
-  "admin/services/proxy-monitor": {
-    "title": "Proxy Monitor",
-    "order": 80,
-    "action": {
-      "type": "view",
-      "path": "services/proxy-monitor"
-    },
-    "depends": {
-      "acl": [
-        "luci-app-proxy-monitor"
-      ]
+chmod 0644 "$B/stage/www/luci-static/resources/view/status/include/00_proxy-monitor.js"
+mkdir -p "$B/stage/usr/share/rpcd/ucode"
+cat > "$B/stage/usr/share/rpcd/ucode/proxy-monitor" <<'RPCPLUGIN'
+'use strict';
+import * as fs from 'fs';
+
+// Native rpcd-mod-ucode loader contract: explicit ubus object + method name.
+// The helper reads UCI natively, avoiding a recursive call into this same rpcd.
+return {
+    'proxy-monitor': {
+        status: {
+            args: {},
+            call: function() {
+                let p = fs.popen('/usr/libexec/proxy-monitor-status', 'r');
+                if (!p) return {};
+                let raw = p.read(65536) || '';
+                let rc = p.close();
+                if (rc != 0) return {};
+                try {
+                    let d = json(raw);
+                    if (type(d) != 'object' || d.backend_version != 15) return {};
+                    d.rpc_backend = 'ucode';
+                    d.rpc_revision = 2;
+                    return d;
+                }
+                catch (e) { return {}; }
+            }
+        }
     }
-  }
-}
-JSONMENU
-chmod 0644 "$B/stage/usr/share/luci/menu.d/luci-app-proxy-monitor.json"
+};
+RPCPLUGIN
+chmod 0644 "$B/stage/usr/share/rpcd/ucode/proxy-monitor"
 mkdir -p "$B/stage/usr/share/rpcd/acl.d"
 cat > "$B/stage/usr/share/rpcd/acl.d/luci-app-proxy-monitor.json" <<'JSONACL'
 {
@@ -433,11 +452,13 @@ chmod 0755 "$B/stage/www/cgi-bin/proxy-monitor-mobile"
 
 # Compile and execute the staged backend before any production writes.
 ucode -c -o "$B/stage/backend.ucb" "$B/stage/usr/libexec/proxy-monitor-status"
+ucode -c -o "$B/stage/rpc-plugin.ucb" "$B/stage/usr/share/rpcd/ucode/proxy-monitor"
+ucode -e 'import * as fs from "fs"; let d=loadstring(fs.stdin.read("all"))(); exit(type(d["proxy-monitor"].status.call) == "function" ? 0 : 1);' < "$B/stage/usr/share/rpcd/ucode/proxy-monitor"
 ucode "$B/stage/usr/libexec/proxy-monitor-status" > "$B/stage/status.json"
 ucode -e 'import * as fs from "fs"; let d=json(fs.stdin.read("all")); exit(d.backend_version == 15 && type(d.active_nodes) == "array" ? 0 : 1);' < "$B/stage/status.json"
 ucode "$B/stage/usr/libexec/proxy-monitor-status" --mobile > "$B/stage/mobile.json"
 ucode -e 'import * as fs from "fs"; let d=json(fs.stdin.read("all")); exit(d.api_version == 7 && d.traffic.available == false ? 0 : 1);' < "$B/stage/mobile.json"
-for p in /usr/share/luci/menu.d/luci-app-proxy-monitor.json /usr/share/rpcd/acl.d/luci-app-proxy-monitor.json; do
+for p in /usr/share/rpcd/acl.d/luci-app-proxy-monitor.json; do
     ucode -e 'import * as fs from "fs"; exit(type(json(fs.stdin.read("all"))) == "object" ? 0 : 1);' < "$B/stage$p"
 done
 MOBILE=0
@@ -472,16 +493,33 @@ while IFS= read -r p; do
     fi
 done < "$B/manifest"
 # Android CGI has been migrated before removing this legacy on-demand collector.
-rm -f /www/luci-static/resources/view/status/include/00_proxy-monitor.js
 rm -f /www/luci-static/resources/view/status/include/75_proxy-monitor.js
+rm -f /www/luci-static/resources/view/services/proxy-monitor.js
+rm -f /usr/share/luci/menu.d/luci-app-proxy-monitor.json
+rm -f /usr/libexec/rpcd/proxy-monitor
 rm -f /usr/libexec/proxy-monitor-traffic
 rm -f /tmp/luci-indexcache
 rm -rf /tmp/luci-modulecache
 /etc/init.d/rpcd restart
-/bin/ubus call proxy-monitor status > "$B/stage/rpc-status.json"
-ucode -e 'import * as fs from "fs"; let d=json(fs.stdin.read("all")); exit(d.backend_version == 15 ? 0 : 1);' < "$B/stage/rpc-status.json"
+# procd restart returns before rpcd has reconnected and loaded plugins.
+# Wait for the NEW native plugin signature, not just an old object name.
+attempt=0
+while :; do
+    if /bin/ubus -t 2 call proxy-monitor status > "$B/stage/rpc-status.json" 2> "$B/stage/rpc-error.txt" &&
+       ucode -e 'import * as fs from "fs"; try { let d=json(fs.stdin.read("all")); exit(d.backend_version == 15 && d.rpc_backend == "ucode" && d.rpc_revision == 2 ? 0 : 1); } catch(e) { exit(1); }' < "$B/stage/rpc-status.json"; then
+        break
+    fi
+    attempt=$((attempt + 1))
+    if [ "$attempt" -ge 10 ]; then
+        echo 'ERROR: native rpcd plugin registration/status not ready after 10 bounded attempts'
+        cat "$B/stage/rpc-error.txt" >&2
+        ls -l /usr/lib/rpcd/ucode.so /usr/share/rpcd/ucode/proxy-monitor >&2 || true
+        exit 1
+    fi
+    sleep 1
+done
 COMMITTED=1
-echo 'Proxy Monitor v15 installed: Services > Proxy Monitor'
+echo 'Proxy Monitor v15 installed: Status > Overview (above System)'
 echo "Backup/rollback: sh $B/rollback.sh"
 if [ "$MOBILE" = 1 ]; then
     echo 'Mobile API v7: add ?token=<contents of /etc/proxy-monitor/mobile-token> to Android URL.'

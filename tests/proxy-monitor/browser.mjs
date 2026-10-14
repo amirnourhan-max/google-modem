@@ -22,6 +22,13 @@ try {
   const result=await page.locator('#checks').innerText();
   assert(!result.includes('FAIL'),result);assert.equal(errors.length,0,errors.join('\n'));
   assert(await page.locator('#surface').innerText().then(s=>s.includes('Inactive / standby')));
+  const throttle=await page.evaluate(async()=>{
+   const start=requests;const root=document.getElementById('proxy-monitor');
+   for(let i=0;i<5;i++){clock+=5000;await registered[0]();}
+   const cached=requests===start;
+   clock+=5000;await registered[0]();
+   return cached&&requests===start+1&&root===document.getElementById('proxy-monitor')&&document.querySelectorAll('#proxy-monitor').length===1;
+  });assert(throttle,'Overview frequent polling must use 30-second gate and stable DOM');
   // Capture native text/background contrast, including the status badges.
   const colors=await page.evaluate(()=>{
    const el=document.querySelector('.pm-badge');
@@ -40,12 +47,18 @@ try {
   const hidden=await page.evaluate(async()=>{
    const before=requests;
    Object.defineProperty(document,'hidden',{configurable:true,get:()=>true});
+   clock+=60000;
    await registered[registered.length-1]();
    const after=requests;
    Object.defineProperty(document,'hidden',{configurable:true,get:()=>false});
    return before===after;
   });assert(hidden);
-  report.push({width,dark,result,colors,hidden});
+  const collapsed=await page.evaluate(async()=>{
+   const before=requests;includes[0].hide=true;clock+=60000;
+   await registered[0]();includes[0].hide=false;return before===requests;
+  });assert(collapsed);
+  await page.locator('#proxy-monitor button').click();
+  report.push({width,dark,result,colors,hidden,collapsed,throttle});
   await page.close();
  }
  // Undefined color tokens: inherited theme text remains readable.
@@ -61,5 +74,5 @@ try {
  await fallback.screenshot({path:'test-results/fallback-no-tokens-360-rtl.png',fullPage:true});
  await fallback.close();
  writeFileSync('test-results/browser-report.json',JSON.stringify(report,null,2));
- console.log('PASS: 6 native Bootstrap light/dark/RTL layouts; fallback theme; partial JSON; hidden polling; contrast ≥4.5');
+ console.log('PASS: 6 native Bootstrap light/dark/RTL Overview layouts; before System; 30s request gate; hidden/collapsed suspension; fallback; partial JSON; contrast ≥4.5');
 } finally { await browser.close(); server.close(); }

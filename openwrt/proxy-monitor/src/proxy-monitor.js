@@ -1,13 +1,18 @@
 'use strict';
-'require view';
+'require baseclass';
 'require rpc';
-'require poll';
 
 var callStatus = rpc.declare({ object: 'proxy-monitor', method: 'status', expect: { '': {} } });
-function fetchStatus() {
-    return callStatus().then(function(d) {
+var cachedStatus = {}, lastRefresh = -Infinity, inFlight = null;
+function fetchStatus(force) {
+    if (inFlight) return inFlight;
+    if (!force && Date.now() - lastRefresh < 30000) return Promise.resolve(cachedStatus);
+    inFlight = callStatus().then(function(d) {
         return d && !Array.isArray(d) && typeof d === 'object' && d.backend_version === 15 ? d : {};
-    }).catch(function() { return {}; });
+    }).catch(function() { return {}; }).then(function(d) {
+        cachedStatus = d; lastRefresh = Date.now(); return d;
+    }).finally(function() { inFlight = null; });
+    return inFlight;
 }
 function state(value, yes, no) {
     return E('span', { 'class': 'pm-badge' }, [
@@ -78,33 +83,36 @@ function panel(d) {
         ])
     ]);
 }
-return view.extend({
-    load: fetchStatus,
+return baseclass.extend({
+    title: _('Proxy Monitor'),
+    load: function() {
+        if (document.hidden || this.hide) return Promise.resolve(cachedStatus);
+        return fetchStatus(false);
+    },
     render: function(d) {
         installStyles();
-        var inFlight = null;
+        // Overview owns polling/rendering. Return the same DOM root to avoid
+        // duplicate handlers, timers and widget IDs on its frequent ticks.
+        if (this.content) { this.update(d); return this.content; }
+        var self = this;
+        this.lastData = d;
         var body = E('div', { 'id': 'proxy-monitor-panel' }, [panel(d)]);
         var content = E('div', { 'id': 'proxy-monitor' }, [
-            E('div', { 'class': 'pm-header' }, [E('h2', {}, [_('Proxy Monitor')]),
+            E('div', { 'class': 'pm-header' }, [
                 E('button', { 'type': 'button', 'class': 'cbi-button cbi-button-action', 'click': function() { return refresh(); } }, [_('Refresh status')])]),
             body,
             E('p', { 'class': 'pm-help' }, [_('Local read-only indicators; configuration and process presence do not prove connectivity. Shared health is published by the existing watchdog. No traffic sampling or connectivity probes. Automatic refresh: 30 seconds while visible.')])
         ]);
-        function refresh() {
-            if (inFlight) return inFlight;
-            inFlight = fetchStatus().then(function(result) {
-                while (body.firstChild) body.removeChild(body.firstChild);
-                body.appendChild(panel(result));
-            }).finally(function() { inFlight = null; });
-            return inFlight;
-        }
-        var tick = function() {
-            if (!document.body.contains(content)) { poll.remove(tick); return Promise.resolve(); }
-            if (document.hidden) return Promise.resolve();
-            return refresh();
+        this.update = function(result) {
+            if (self.lastData === result) return;
+            self.lastData = result;
+            while (body.firstChild) body.removeChild(body.firstChild);
+            body.appendChild(panel(result));
         };
-        poll.add(tick, 30);
+        function refresh() {
+            return fetchStatus(true).then(function(result) { self.update(result); });
+        }
+        this.content = content;
         return content;
-    },
-    handleSaveApply: null, handleSave: null, handleReset: null
+    }
 });

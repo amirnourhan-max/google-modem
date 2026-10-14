@@ -14,21 +14,40 @@ class RouterFixture:
         self.temp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self.temp.name)
         self.env = os.environ.copy()
-        self.prefixes = ['/usr/libexec', '/usr/share/luci', '/usr/share/rpcd', '/usr/bin', '/usr/sbin',
+        self.prefixes = ['/usr/libexec', '/usr/share/luci', '/usr/share/rpcd', '/usr/lib/rpcd', '/usr/bin', '/usr/sbin',
                          '/www', '/root/recovery', '/etc/proxy-monitor', '/etc/crontabs',
                          '/etc/init.d/rpcd', '/var/run', '/proc', '/tmp/luci', '/tmp/proxy-monitor', '/bin/ubus']
         self.put('/usr/bin/ucode', '#!/bin/sh\nexec '+UCODE+' "$@"\n', 0o755)
+        self.put('/usr/lib/rpcd/ucode.so', 'fixture-module-sentinel')
+        self.put('/uci.uc', '''import * as fs from 'fs';
+export function cursor() {
+    return { get_all: function(config) {
+        try { let d=json(fs.readfile('ROOT/config.json')); return type(d.values) == 'object' ? d.values : {}; }
+        catch(e) { return {}; }
+    }, unload: function(config) {} };
+}
+'''.replace('ROOT',str(self.root)))
         self.put('/bin/ubus', '''#!/bin/sh
+[ "$1" != -t ] || shift 2
 case "$1:$2:$3" in
   call:uci:get) cat "ROOT/config.json" ;;
   call:service:list) cat "ROOT/service.json" ;;
-  call:proxy-monitor:status) "ROOT/usr/libexec/rpcd/proxy-monitor" call status ;;
+  call:proxy-monitor:status)
+    if [ -f "ROOT/delay-registration" ] && [ "$(date +%s)" -le "$(cat ROOT/rpc-ready-after)" ]; then
+        echo 'Command failed: Not found' >&2; exit 4
+    fi
+    "ROOT/usr/bin/ucode" "ROOT/rpc-call.uc" ;;
   *) exit 1 ;;
 esac
 '''.replace('ROOT', str(self.root)), 0o755)
+        self.put('/rpc-call.uc', '''import * as fs from 'fs';
+let api = loadstring(fs.readfile('ROOT/usr/share/rpcd/ucode/proxy-monitor'))();
+printf('%J\\n', api['proxy-monitor'].status.call());
+'''.replace('ROOT',str(self.root)))
         self.put('/etc/init.d/rpcd', '''#!/bin/sh
 [ "$1" = restart ] || exit 99
 echo restart >> "ROOT/restarts"
+if [ -f "ROOT/delay-registration" ]; then date +%s > "ROOT/rpc-ready-after"; fi
 if [ -f "ROOT/fail-restart" ]; then rm "ROOT/fail-restart"; exit 1; fi
 '''.replace('ROOT', str(self.root)), 0o755)
         self.root.joinpath('config.json').write_text('{}')
@@ -52,6 +71,7 @@ if [ -f "ROOT/fail-restart" ]; then rm "ROOT/fail-restart"; exit 1; fi
         source = re.sub('|'.join(re.escape(p) for p in sorted(self.prefixes, key=len, reverse=True)),
                         lambda m: str(self.root)+m[0], source)
         source = source.replace("'__CRON_COMMAND__'", "'/root/recovery/internet-watchdog.sh'")
+        source = source.replace("from 'uci'", "from '"+str(self.root)+"/uci.uc'")
         source = source.replace('PATH=/usr/sbin:/usr/bin:/sbin:/bin',
                                 'PATH='+str(self.root)+'/usr/bin:'+str(self.root)+'/bin:'+os.environ['PATH'])
         # PATH was redirected above; replace its generated form too.
@@ -59,7 +79,7 @@ if [ -f "ROOT/fail-restart" ]; then rm "ROOT/fail-restart"; exit 1; fi
                                 'PATH='+str(self.root)+'/usr/bin:'+str(self.root)+'/bin:'+os.environ['PATH'])
         return source
     def run(self, path, *args, env=None):
-        return subprocess.run(['sh', str(path), *args], env=env or self.env, capture_output=True, text=True, timeout=15)
+        return subprocess.run(['sh', str(path), *args], env=env or self.env, capture_output=True, text=True, timeout=40)
     def status(self, mobile=False):
         p = subprocess.run([UCODE, str(self.path('/usr/libexec/proxy-monitor-status')), *(['--mobile'] if mobile else [])],
                            env=self.env, capture_output=True, text=True, timeout=5)
@@ -162,6 +182,22 @@ class RuntimeTests(unittest.TestCase):
         self.assertNotEqual(result.returncode,0)
         self.assertEqual(self.f.path('/usr/libexec/proxy-monitor-status').read_bytes(),before)
         self.assertFalse(self.f.path('/usr/libexec/rpcd/proxy-monitor').exists())
+        self.assertFalse(self.f.path('/usr/share/rpcd/ucode/proxy-monitor').exists())
+    def test_native_loader_and_overview_files_only(self):
+        self.f.put('/usr/libexec/rpcd/proxy-monitor','legacy-exec-plugin',0o755)
+        self.f.put('/www/luci-static/resources/view/services/proxy-monitor.js','legacy-services-view')
+        self.f.put('/usr/share/luci/menu.d/luci-app-proxy-monitor.json','{}')
+        result=self.f.run(self.f.installer())
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertTrue(self.f.path('/www/luci-static/resources/view/status/include/00_proxy-monitor.js').exists())
+        self.assertTrue(self.f.path('/usr/share/rpcd/ucode/proxy-monitor').exists())
+        self.assertFalse(self.f.path('/usr/libexec/rpcd/proxy-monitor').exists())
+        self.assertFalse(self.f.path('/www/luci-static/resources/view/services/proxy-monitor.js').exists())
+        self.assertFalse(self.f.path('/usr/share/luci/menu.d/luci-app-proxy-monitor.json').exists())
+    def test_asynchronous_rpcd_start_does_not_trigger_false_rollback(self):
+        self.f.root.joinpath('delay-registration').touch()
+        result=self.f.run(self.f.installer())
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
     def test_failed_deployment_write_restores_already_updated_files(self):
         before=self.f.path('/usr/libexec/proxy-monitor-status').read_bytes()
         real_cp=shutil.which('cp')

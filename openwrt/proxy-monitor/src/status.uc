@@ -1,6 +1,7 @@
 #!/usr/bin/ucode
 'use strict';
 import * as fs from 'fs';
+import { cursor } from 'uci';
 
 // Only fixed local commands. UCI values are never shell arguments.
 function command(cmd) {
@@ -35,9 +36,14 @@ function number(s) {
     return type(s) == 'string' && match(s, /^[0-9]{1,8}$/) ? int(s) : null;
 }
 
-// Stable rpcd UCI interface, no generated engine configuration or subscription reads.
-let conf = object(command("/bin/ubus call uci get '{\"config\":\"passwall2\"}' 2>/dev/null"));
-let values = type(conf.values) == 'object' ? conf.values : {};
+// Native read-only UCI. Calling uci.get over ubus from a synchronous rpcd
+// ucode callback would recurse into the same daemon and can deadlock.
+let values = {};
+let ctx = cursor();
+try { values = ctx.get_all('passwall2') || {}; }
+catch (e) { values = {}; }
+ctx.unload('passwall2');
+if (type(values) != 'object') values = {};
 let global = {};
 let apps = {};
 for (let key, val in values)
@@ -76,7 +82,9 @@ function installed(name, custom) {
         if (fs.access(dir + name, 'x')) return true;
     return false;
 }
-let services = object(command('/bin/ubus call service list 2>/dev/null'));
+// Native rpcd callbacks are synchronous; bound the other-daemon request so
+// unavailable procd cannot stall LuCI for the CLI's default 30-second timeout.
+let services = object(command('/bin/ubus -t 1 call service list 2>/dev/null'));
 function service_running(name) {
     if (type(services[name]) != 'object' || type(services[name].instances) != 'object') return null;
     let observed = 0;
