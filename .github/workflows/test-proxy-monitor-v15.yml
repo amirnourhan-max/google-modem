@@ -1,0 +1,52 @@
+name: Test Proxy Monitor v15
+on:
+  push:
+    branches: [proxy-monitor-luci-theme-lightweight-v15]
+    paths: ['openwrt/proxy-monitor/**', 'openwrt/mobile-api/**', 'tests/proxy-monitor/**', '.github/workflows/test-proxy-monitor-v15.yml']
+  pull_request:
+    paths: ['openwrt/proxy-monitor/**', 'openwrt/mobile-api/**', 'tests/proxy-monitor/**', '.github/workflows/test-proxy-monitor-v15.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build real ucode runtime
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake libjson-c-dev pkg-config
+          git clone https://github.com/openwrt/ucode.git /tmp/ucode-src
+          git -C /tmp/ucode-src checkout fa288dd9b827045265900d0d25f9d834ffd755bf
+          cmake -S /tmp/ucode-src -B /tmp/ucode-build -DCMAKE_INSTALL_PREFIX=/tmp/ucode-runtime -DUBUS_SUPPORT=OFF -DUCI_SUPPORT=OFF -DRTNL_SUPPORT=OFF -DNL80211_SUPPORT=OFF -DULOOP_SUPPORT=OFF -DZLIB_SUPPORT=OFF -DDIGEST_SUPPORT=OFF -DFFI_SUPPORT=OFF
+          cmake --build /tmp/ucode-build -j2
+          cmake --install /tmp/ucode-build
+      - name: Shell, generation, runtime, installation, rollback and API tests
+        env:
+          UCODE: /tmp/ucode-runtime/bin/ucode
+          LD_LIBRARY_PATH: /tmp/ucode-runtime/lib
+        run: |
+          python3 openwrt/proxy-monitor/build-installer.py
+          git diff --exit-code -- openwrt/proxy-monitor/install-proxy-monitor-v15.sh
+          sh -n openwrt/proxy-monitor/install-proxy-monitor-v15.sh
+          sh -n openwrt/mobile-api/install-proxy-monitor-mobile-api-v7.sh
+          sh -n openwrt/proxy-monitor/src/mobile.cgi
+          sh -n openwrt/proxy-monitor/src/rpc-plugin.sh
+          python3 -m unittest discover -s tests/proxy-monitor -v
+      - name: Real browser testing with pinned Bootstrap theme
+        run: |
+          curl --fail --location https://raw.githubusercontent.com/openwrt/luci/d12d55376188343d790fa40377c084245a4d2b86/themes/luci-theme-bootstrap/htdocs/luci-static/bootstrap/cascade.css -o /tmp/bootstrap.css
+          python3 tests/proxy-monitor/build-preview.py /tmp/bootstrap.css /tmp/preview.html
+          npm install --no-save playwright@1.62.1
+          npx playwright install --with-deps chromium
+          node tests/proxy-monitor/browser.mjs /tmp/preview.html
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: proxy-monitor-v15-test-results
+          path: test-results/
