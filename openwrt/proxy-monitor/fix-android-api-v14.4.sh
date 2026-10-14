@@ -35,14 +35,14 @@ TOKEN=/etc/proxy-monitor/mobile-token
 reply() {
  printf 'Status: %s\r\nContent-Type: application/json; charset=utf-8\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n\r\n%s\n' "$1" "$2"
 }
-[ "\${REQUEST_METHOD:-GET}" = GET ] || { reply "405 Method Not Allowed" '{"error":"GET required"}'; exit 0; }
-case "\${REMOTE_ADDR:-}" in
+[ "${REQUEST_METHOD:-GET}" = GET ] || { reply "405 Method Not Allowed" '{"error":"GET required"}'; exit 0; }
+case "${REMOTE_ADDR:-}" in
   10.*|192.168.*|127.*|::1|fd*|fe80:*|172.1[6-9].*|172.2[0-9].*|172.3[01].*) ;;
   *) reply "403 Forbidden" '{"error":"LAN only"}'; exit 0 ;;
 esac
 secret="$(cat "$TOKEN" 2>/dev/null || true)"
-[ "\${#secret}" = 64 ] || { reply "503 Service Unavailable" '{"error":"API token unavailable"}'; exit 0; }
-case "&\${QUERY_STRING:-}&" in
+[ "${#secret}" = 64 ] || { reply "503 Service Unavailable" '{"error":"API token unavailable"}'; exit 0; }
+case "&${QUERY_STRING:-}&" in
   *"&token=$secret&"*) ;;
   *) reply "403 Forbidden" '{"error":"Token required"}'; exit 0 ;;
 esac
