@@ -31,6 +31,8 @@
 
 CI اختصاصی ucode+Chromium برای۶حالت Bootstrap Light/Dark/RTL در۳۶۰/۷۶۸/۱۳۶۶ و fallback بدون tokens، contrast، partial JSON و hidden polling اجرا شد. در run38531105768، آزمون‌های shell/runtime/API و browser پاس شدند؛ تنها upload-artifact با خطای صریح quota شکست خورد. ذخیرهٔ شواهد به ZIP دارای SHA256 در job log و گزارش در step summary منتقل شد؛ مجوز CI همچنان contents:read است و test failure مخفی نمی‌شود. اجراهای قبلی با URL نادرست upstream و نبود root در runner شکست خورده بودند؛ هر دو اصلاح شدند. نتیجهٔ workflow نهایی در PR/تحویل ثبت می‌شود.
 
+**نتیجهٔ ثبت‌شده:** [Run38531448259 — Success](https://github.com/amirnourhan-max/google-modem/actions/runs/38531448259)؛ ۲۱ آزمون runtime و تمام آزمون‌های Chromium و export شواهد موفق شدند. تصاویر واقعی renderer و JSON در `tests/proxy-monitor/evidence/` حفظ شده‌اند. نسبت contrast اندازه‌گیری‌شده۱۰٫۳۷در Light و۸٫۶۵در Dark است. Light desktop و Dark mobile نیز بصری بازبینی شدند و هم‌پوشانی/اسکرول افقی مشاهده نشد. این fixture صفحهٔ واقعی روتر نیست.
+
 **نصب:** NOT VERIFIED. SSH از Work با Network is unreachable شکست خورد؛ هیچ فایل یا سرویس روتر تغییر نکرد. پیش از deploy باید سلامت Extreme Internet Resilience، SSH و تم واقعی محلی تأیید شود. دستورات دقیق و rollback در installation-fa.md و دستور کار Codex ویندوز در deployment-local-codex-fa.md هستند.
 
 **محدودیت‌ها:** قرارداد واقعی watchdog/LED در مخزن نیست؛ ناسازگاری UNKNOWN است. خواندن UCI حداکثر۲۶۲۱۴۴بایت است؛ config بسیار بزرگ یا schema ناشناخته ممکن است UNKNOWN بدهد. کل نصب transaction اتمیک filesystem نیست؛ فقط هر فایل اتمیک جایگزین می‌شود. SIGKILL/قطع برق ممکن است rollback خودکار را متوقف کند؛ snapshot/manual rollback باقی می‌ماند. نود دقیق فعال balancer دانسته نمی‌شود. ACL/rpcd/Android/theme واقعی باید روی دستگاه آزمایش شوند.

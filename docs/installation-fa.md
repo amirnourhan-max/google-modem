@@ -15,6 +15,8 @@ ssh root@192.168.28.1 "sha256sum /tmp/install-proxy-monitor-v15.sh; sh -n /tmp/i
 
 هش روتر و محلی باید برابر باشند. host key را با fingerprint معتبر تطبیق دهید؛ StrictHostKeyChecking را غیرفعال نکنید. پس از تأیید baseline:
 
+SHA256 نصب‌کنندهٔ آزموده‌شده: `2f4e18b4e88995c583d3c1fdc80294444d0af1e87bb5966ad7bd3ed5704d04d3`.
+
 ```powershell
 ssh root@192.168.28.1 "sh /tmp/install-proxy-monitor-v15.sh"
 ssh root@192.168.28.1 "ubus call proxy-monitor status"
