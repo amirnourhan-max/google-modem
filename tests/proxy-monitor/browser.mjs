@@ -22,6 +22,11 @@ try {
   const result=await page.locator('#checks').innerText();
   assert(!result.includes('FAIL'),result);assert.equal(errors.length,0,errors.join('\n'));
   assert(await page.locator('#surface').innerText().then(s=>s.includes('Inactive / standby')));
+  assert.equal(await page.locator('#proxy-monitor-nodes .pm-node').count(),3);
+  assert((await page.locator('#proxy-monitor-nodes').innerText()).includes('🇩🇪'));
+  assert((await page.locator('#proxy-monitor-nodes').innerText()).includes('inferred'));
+  assert((await page.locator('#proxy-monitor-exit').innerText()).includes('8.8.4.4'));
+  assert.equal(await page.evaluate(()=>exitRequests),0,'Opening and polling must never initiate exit checks');
   const throttle=await page.evaluate(async()=>{
    const start=requests;const root=document.getElementById('proxy-monitor');
    for(let i=0;i<5;i++){clock+=5000;await registered[0]();}
@@ -62,7 +67,11 @@ try {
    const before=requests;includes[0].hide=true;clock+=60000;
    await registered[0]();includes[0].hide=false;return before===requests;
   });assert(collapsed);
-  await page.locator('#proxy-monitor button').click();
+  await page.locator('#proxy-monitor button').first().click();
+  const beforeExit=await page.evaluate(()=>exitRequests);
+  await page.locator('#proxy-monitor-exit button').click();
+  assert.equal(await page.evaluate(()=>exitRequests),beforeExit+1);
+  assert((await page.locator('#proxy-monitor-exit').innerText()).includes('2606:4700:4700::1111'));
   report.push({width,dark,result,colors,hidden,collapsed,throttle});
   await page.close();
  }

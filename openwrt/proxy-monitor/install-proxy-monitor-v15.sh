@@ -36,16 +36,21 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
+[ ! -e /tmp/proxy-monitor-exit.lock ] || { echo 'ERROR: manual exit check busy; retry after it finishes'; exit 1; }
 mkdir -p /root/recovery
 B=$(mktemp -d /root/recovery/proxy-monitor-v15-XXXXXXXX)
 mkdir -p "$B/originals" "$B/stage"
 cat > "$B/manifest" <<'MANIFEST'
+/usr/share/ucode/proxy-monitor.uc
+/usr/libexec/proxy-monitor-exit-check.uc
+/usr/libexec/proxy-monitor-exit
 /usr/libexec/proxy-monitor-status
 /www/luci-static/resources/view/status/include/00_proxy-monitor.js
 /usr/share/rpcd/ucode/proxy-monitor
 /usr/share/rpcd/acl.d/luci-app-proxy-monitor.json
 /www/cgi-bin/proxy-monitor-mobile
 /etc/proxy-monitor/mobile-token
+/tmp/proxy-monitor-exit.json
 /usr/libexec/rpcd/proxy-monitor
 /www/luci-static/resources/view/services/proxy-monitor.js
 /usr/share/luci/menu.d/luci-app-proxy-monitor.json
@@ -72,6 +77,7 @@ if [ "${1:-}" != --held-lock ]; then
     mkdir "$LOCK" 2>/dev/null || { echo 'ERROR: installation/rollback lock exists'; exit 1; }
     trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
 fi
+[ ! -e /tmp/proxy-monitor-exit.lock ] || { echo 'ERROR: manual exit check busy; retry rollback after it finishes'; exit 1; }
 check_parents() {
     d=$(dirname "$1")
     while [ "$d" != / ]; do
@@ -99,12 +105,578 @@ rm -rf /tmp/luci-modulecache
 echo "Proxy Monitor restored: $B"
 ROLLBACK
 chmod 0700 "$B/rollback.sh"
+mkdir -p "$B/stage/usr/share/ucode"
+cat > "$B/stage/usr/share/ucode/proxy-monitor.uc" <<'PMDATA'
+'use strict';
+import * as fs from 'fs';
+import { cursor } from 'uci';
+
+// Static ISO 3166-1 alpha-2 whitelist and local English labels (Intl/CLDR).
+// No flag asset requests and no server-address geolocation or DNS lookups.
+const countries = {
+  "AD": "Andorra",
+  "AE": "United Arab Emirates",
+  "AF": "Afghanistan",
+  "AG": "Antigua & Barbuda",
+  "AI": "Anguilla",
+  "AL": "Albania",
+  "AM": "Armenia",
+  "AO": "Angola",
+  "AQ": "Antarctica",
+  "AR": "Argentina",
+  "AS": "American Samoa",
+  "AT": "Austria",
+  "AU": "Australia",
+  "AW": "Aruba",
+  "AX": "Åland Islands",
+  "AZ": "Azerbaijan",
+  "BA": "Bosnia & Herzegovina",
+  "BB": "Barbados",
+  "BD": "Bangladesh",
+  "BE": "Belgium",
+  "BF": "Burkina Faso",
+  "BG": "Bulgaria",
+  "BH": "Bahrain",
+  "BI": "Burundi",
+  "BJ": "Benin",
+  "BL": "St. Barthélemy",
+  "BM": "Bermuda",
+  "BN": "Brunei",
+  "BO": "Bolivia",
+  "BQ": "Caribbean Netherlands",
+  "BR": "Brazil",
+  "BS": "Bahamas",
+  "BT": "Bhutan",
+  "BV": "Bouvet Island",
+  "BW": "Botswana",
+  "BY": "Belarus",
+  "BZ": "Belize",
+  "CA": "Canada",
+  "CC": "Cocos (Keeling) Islands",
+  "CD": "Congo - Kinshasa",
+  "CF": "Central African Republic",
+  "CG": "Congo - Brazzaville",
+  "CH": "Switzerland",
+  "CI": "Côte d’Ivoire",
+  "CK": "Cook Islands",
+  "CL": "Chile",
+  "CM": "Cameroon",
+  "CN": "China",
+  "CO": "Colombia",
+  "CR": "Costa Rica",
+  "CU": "Cuba",
+  "CV": "Cape Verde",
+  "CW": "Curaçao",
+  "CX": "Christmas Island",
+  "CY": "Cyprus",
+  "CZ": "Czechia",
+  "DE": "Germany",
+  "DJ": "Djibouti",
+  "DK": "Denmark",
+  "DM": "Dominica",
+  "DO": "Dominican Republic",
+  "DZ": "Algeria",
+  "EC": "Ecuador",
+  "EE": "Estonia",
+  "EG": "Egypt",
+  "EH": "Western Sahara",
+  "ER": "Eritrea",
+  "ES": "Spain",
+  "ET": "Ethiopia",
+  "FI": "Finland",
+  "FJ": "Fiji",
+  "FK": "Falkland Islands",
+  "FM": "Micronesia",
+  "FO": "Faroe Islands",
+  "FR": "France",
+  "GA": "Gabon",
+  "GB": "United Kingdom",
+  "GD": "Grenada",
+  "GE": "Georgia",
+  "GF": "French Guiana",
+  "GG": "Guernsey",
+  "GH": "Ghana",
+  "GI": "Gibraltar",
+  "GL": "Greenland",
+  "GM": "Gambia",
+  "GN": "Guinea",
+  "GP": "Guadeloupe",
+  "GQ": "Equatorial Guinea",
+  "GR": "Greece",
+  "GS": "South Georgia & South Sandwich Islands",
+  "GT": "Guatemala",
+  "GU": "Guam",
+  "GW": "Guinea-Bissau",
+  "GY": "Guyana",
+  "HK": "Hong Kong SAR China",
+  "HM": "Heard & McDonald Islands",
+  "HN": "Honduras",
+  "HR": "Croatia",
+  "HT": "Haiti",
+  "HU": "Hungary",
+  "ID": "Indonesia",
+  "IE": "Ireland",
+  "IL": "Israel",
+  "IM": "Isle of Man",
+  "IN": "India",
+  "IO": "British Indian Ocean Territory",
+  "IQ": "Iraq",
+  "IR": "Iran",
+  "IS": "Iceland",
+  "IT": "Italy",
+  "JE": "Jersey",
+  "JM": "Jamaica",
+  "JO": "Jordan",
+  "JP": "Japan",
+  "KE": "Kenya",
+  "KG": "Kyrgyzstan",
+  "KH": "Cambodia",
+  "KI": "Kiribati",
+  "KM": "Comoros",
+  "KN": "St. Kitts & Nevis",
+  "KP": "North Korea",
+  "KR": "South Korea",
+  "KW": "Kuwait",
+  "KY": "Cayman Islands",
+  "KZ": "Kazakhstan",
+  "LA": "Laos",
+  "LB": "Lebanon",
+  "LC": "St. Lucia",
+  "LI": "Liechtenstein",
+  "LK": "Sri Lanka",
+  "LR": "Liberia",
+  "LS": "Lesotho",
+  "LT": "Lithuania",
+  "LU": "Luxembourg",
+  "LV": "Latvia",
+  "LY": "Libya",
+  "MA": "Morocco",
+  "MC": "Monaco",
+  "MD": "Moldova",
+  "ME": "Montenegro",
+  "MF": "St. Martin",
+  "MG": "Madagascar",
+  "MH": "Marshall Islands",
+  "MK": "North Macedonia",
+  "ML": "Mali",
+  "MM": "Myanmar (Burma)",
+  "MN": "Mongolia",
+  "MO": "Macao SAR China",
+  "MP": "Northern Mariana Islands",
+  "MQ": "Martinique",
+  "MR": "Mauritania",
+  "MS": "Montserrat",
+  "MT": "Malta",
+  "MU": "Mauritius",
+  "MV": "Maldives",
+  "MW": "Malawi",
+  "MX": "Mexico",
+  "MY": "Malaysia",
+  "MZ": "Mozambique",
+  "NA": "Namibia",
+  "NC": "New Caledonia",
+  "NE": "Niger",
+  "NF": "Norfolk Island",
+  "NG": "Nigeria",
+  "NI": "Nicaragua",
+  "NL": "Netherlands",
+  "NO": "Norway",
+  "NP": "Nepal",
+  "NR": "Nauru",
+  "NU": "Niue",
+  "NZ": "New Zealand",
+  "OM": "Oman",
+  "PA": "Panama",
+  "PE": "Peru",
+  "PF": "French Polynesia",
+  "PG": "Papua New Guinea",
+  "PH": "Philippines",
+  "PK": "Pakistan",
+  "PL": "Poland",
+  "PM": "St. Pierre & Miquelon",
+  "PN": "Pitcairn Islands",
+  "PR": "Puerto Rico",
+  "PS": "Palestinian Territories",
+  "PT": "Portugal",
+  "PW": "Palau",
+  "PY": "Paraguay",
+  "QA": "Qatar",
+  "RE": "Réunion",
+  "RO": "Romania",
+  "RS": "Serbia",
+  "RU": "Russia",
+  "RW": "Rwanda",
+  "SA": "Saudi Arabia",
+  "SB": "Solomon Islands",
+  "SC": "Seychelles",
+  "SD": "Sudan",
+  "SE": "Sweden",
+  "SG": "Singapore",
+  "SH": "St. Helena",
+  "SI": "Slovenia",
+  "SJ": "Svalbard & Jan Mayen",
+  "SK": "Slovakia",
+  "SL": "Sierra Leone",
+  "SM": "San Marino",
+  "SN": "Senegal",
+  "SO": "Somalia",
+  "SR": "Suriname",
+  "SS": "South Sudan",
+  "ST": "São Tomé & Príncipe",
+  "SV": "El Salvador",
+  "SX": "Sint Maarten",
+  "SY": "Syria",
+  "SZ": "Eswatini",
+  "TC": "Turks & Caicos Islands",
+  "TD": "Chad",
+  "TF": "French Southern Territories",
+  "TG": "Togo",
+  "TH": "Thailand",
+  "TJ": "Tajikistan",
+  "TK": "Tokelau",
+  "TL": "Timor-Leste",
+  "TM": "Turkmenistan",
+  "TN": "Tunisia",
+  "TO": "Tonga",
+  "TR": "Türkiye",
+  "TT": "Trinidad & Tobago",
+  "TV": "Tuvalu",
+  "TW": "Taiwan",
+  "TZ": "Tanzania",
+  "UA": "Ukraine",
+  "UG": "Uganda",
+  "UM": "U.S. Outlying Islands",
+  "US": "United States",
+  "UY": "Uruguay",
+  "UZ": "Uzbekistan",
+  "VA": "Vatican City",
+  "VC": "St. Vincent & Grenadines",
+  "VE": "Venezuela",
+  "VG": "British Virgin Islands",
+  "VI": "U.S. Virgin Islands",
+  "VN": "Vietnam",
+  "VU": "Vanuatu",
+  "WF": "Wallis & Futuna",
+  "WS": "Samoa",
+  "YE": "Yemen",
+  "YT": "Mayotte",
+  "ZA": "South Africa",
+  "ZM": "Zambia",
+  "ZW": "Zimbabwe"
+};
+const aliases = { 'uk':'GB', 'usa':'US', 'united states':'US', 'south korea':'KR', 'russia':'RU',
+    'آلمان':'DE', 'هلند':'NL', 'فرانسه':'FR', 'انگلیس':'GB', 'بریتانیا':'GB', 'آمریکا':'US',
+    'امریکا':'US', 'ترکیه':'TR', 'ایران':'IR', 'ژاپن':'JP', 'کانادا':'CA', 'سنگاپور':'SG',
+    'روسیه':'RU', 'فنلاند':'FI', 'سوئد':'SE', 'امارات':'AE', 'استرالیا':'AU' };
+export function country_code(s) {
+    if (type(s) != 'string') return '';
+    s = uc(trim(s)); return countries[s] ? s : '';
+}
+export function country_info(code, source) {
+    code = country_code(code);
+    return { code: code, name: code ? countries[code] : '',
+        flag: code ? uchr(0x1f1e6 + ord(code, 0) - 65, 0x1f1e6 + ord(code, 1) - 65) : '🌐',
+        source: code ? source : 'unknown' };
+}
+function bounded_word(haystack, needle) {
+    // Country names are literal strings, never regular expressions.
+    let words = split(haystack, /[^a-zA-Z\x80-\xff]+/);
+    let joined = ' ' + join(' ', words) + ' ';
+    return index(joined, ' ' + needle + ' ') >= 0;
+}
+export function country(metadata, name) {
+    metadata = type(metadata) == 'object' ? metadata : {};
+    for (let key in ['country_code', 'country_iso', 'country']) {
+        let code = country_code(metadata[key]);
+        if (code) return country_info(code, 'metadata');
+        if (type(metadata[key]) == 'string') {
+            let value = lc(trim(metadata[key]));
+            if (aliases[value]) return country_info(aliases[value], 'metadata');
+            for (let cc, label in countries)
+                if (lc(label) == value) return country_info(cc, 'metadata');
+        }
+    }
+    if (type(name) != 'string') return country_info('', 'unknown');
+    let hits = {};
+    for (let cc, label in countries) {
+        if (index(name, country_info(cc, 'inferred').flag) >= 0 ||
+            index(split(name, /[^A-Za-z]+/), cc) >= 0 || bounded_word(lc(name), lc(label))) hits[cc] = true;
+    }
+    for (let word, code in aliases)
+        if (bounded_word(lc(name), word)) hits[code] = true;
+    return country_info(length(keys(hits)) == 1 ? keys(hits)[0] : '', 'inferred');
+}
+export function display_label(s, fallback, limit) {
+    // Return metadata only. Never return configuration, server URL or secrets.
+    if (type(s) != 'string' || length(s) > (limit || 1024) ||
+        match(s, /[[:cntrl:]]/) || match(s, /[A-Za-z][A-Za-z0-9+.-]*:\/\//) ||
+        match(s, /[^ ]+:[^ ]+@/)) return fallback;
+    return s || fallback;
+}
+export function node_id(s) { return type(s) == 'string' && match(s, /^[A-Za-z0-9_]{1,64}$/) ? s : ''; }
+export function configuration() {
+    let c = cursor(), values = {};
+    try { values = c.get_all('passwall2') || {}; } catch (e) {}
+    c.unload('passwall2'); return type(values) == 'object' ? values : {};
+}
+export function first_section(values, kind) {
+    let result = {};
+    for (let key, value in values)
+        if (type(value) == 'object' && value['.type'] == kind &&
+            (result['.index'] == null || value['.index'] < result['.index'])) result = value;
+    return result;
+}
+function percent_decode(s) {
+    let out='';
+    for(let i=0;i<length(s);i++) {
+        if(substr(s,i,1)=='%' && match(substr(s,i+1,2),/^[0-9a-fA-F]{2}$/)) {out+=chr(int(substr(s,i+1,2),16));i+=2;}
+        else out+=substr(s,i,1)=='+' ? ' ' : substr(s,i,1);
+    }
+    return out;
+}
+function literal_rule(name, rule) {
+    if(rule=='')return true;
+    for(let group in split(rule,'||')) {
+        if(!trim(group))continue;
+        let yes=true;
+        for(let term in split(group,'&&')) {
+            term=trim(term);if(!term)continue;
+            let test;
+            if(substr(term,0,1)=='!')test=index(name,substr(term,1))<0 || length(term)==1;
+            else if(substr(term,0,1)=='^')test=index(name,substr(term,1))==0;
+            else if(substr(term,-1)=='$') {let value=substr(term,0,length(term)-1);test=substr(name,-length(value))==value;}
+            else test=index(name,term)>=0;
+            if(!test){yes=false;break;}
+        }
+        if(yes)return true;
+    }
+    return false;
+}
+function ipv6_words(s) {
+    if(type(s)!='string' || length(s)>39 || !match(s,/^[0-9a-fA-F:]+$/))return null;
+    let halves=split(lc(s),'::');if(length(halves)>2)return null;
+    let left=halves[0] ? split(halves[0],':') : [];
+    let right=length(halves)==2 && halves[1] ? split(halves[1],':') : [];
+    let count=length(left)+length(right);
+    if((length(halves)==1 && count!=8) || (length(halves)==2 && count>=8))return null;
+    for(let word in [...left,...right])if(!match(word,/^[0-9a-f]{1,4}$/))return null;
+    let words=[...left];if(length(halves)==2)for(let i=count;i<8;i++)push(words,'0');
+    return map([...words,...right],word=>int(word,16));
+}
+function ipv4_parts(s) {
+    if(type(s)!='string' || !match(s,/^(0|[1-9][0-9]{0,2})(\.(0|[1-9][0-9]{0,2})){3}$/))return null;
+    let a=map(split(s,'.'),v=>int(v));return max(a[0],a[1],a[2],a[3])<=255 ? a : null;
+}
+function server_address(s) {
+    if(type(s)!='string' || !length(s) || length(s)>253)return false;
+    if(index(s,':')>=0)return ipv6_words(s)!=null;
+    if(match(s,/^[0-9.]+$/))return ipv4_parts(s)!=null;
+    if(substr(s,-1)=='.')s=substr(s,0,length(s)-1);
+    for(let word in split(s,'.'))if(!match(word,/^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/))return false;
+    return true;
+}
+export function members(balance, values) {
+    if(!balance.node_add_mode || balance.node_add_mode=='manual')return {
+        supported:true,ids:type(balance.balancing_node)=='array' ? balance.balancing_node :
+            type(balance.balancing_node)=='string' ? split(trim(balance.balancing_node),/[ \t]+/) : [] };
+    if(balance.node_add_mode!='batch' || type(balance.node_group)!='string' ||
+        (balance.node_match_rule!=null && type(balance.node_match_rule)!='string'))return {supported:false,ids:[]};
+    let groups=map(split(trim(balance.node_group),/[ \t]+/),g=>lc(percent_decode(g))), ids=[];
+    let rule=balance.node_match_rule || '';
+    for(let key,n in values) {
+        if(type(n)!='object' || n['.type']!='nodes' || !n.type || !n.remarks || n.chain_proxy ||
+            index(['_balancing','_shunt','_iface','_urltest'],n.protocol)>=0 ||
+            !((server_address(n.address) && (n.port || n.hysteria_hop || n.hysteria2_hop)) || (n.protocol=='hysteria2' && n.hysteria2_realms)))continue;
+        if(index(groups,lc(n.group || 'default'))>=0 && literal_rule(n.remarks,rule))push(ids,key);
+    }
+    return {supported:true,ids:ids};
+}
+function port(s) { return type(s) == 'string' && match(s, /^[0-9]{1,5}$/) && int(s) > 0 && int(s) <= 65535 ? int(s) : 0; }
+function proxy_route(values, id, seen) {
+    if (!node_id(id) || seen[id]) return false;
+    let n = values[id]; if (type(n) != 'object') return false;
+    if (n['.type'] != 'nodes' || index(['Xray','Sing-Box','sing-box'],n.type)<0 || n.chain_proxy) return false;
+    if(length(keys(seen))>=8)return false;
+    seen={...seen};seen[id] = true;
+    if (n.protocol == '_balancing') {
+        if (n.fallback_node && !proxy_route(values, n.fallback_node, seen)) return false;
+        let selection=members(n,values);
+        if(!selection.supported || !length(selection.ids))return false;
+        for(let member in selection.ids) {
+            if(type(values[member])!='object' || values[member].protocol=='_balancing' || !proxy_route(values,member,seen))return false;
+        }
+        return true;
+    }
+    return index(['vless','vmess','trojan','shadowsocks','socks','http','hysteria2','tuic','wireguard'], n.protocol) >= 0 &&
+        server_address(n.address) && port(n.port)>0;
+}
+export function socks_route(values) {
+    let g = first_section(values, 'global');
+    let selected = node_id(g.node) || node_id(g.tcp_node);
+    let node = type(values[selected]) == 'object' ? values[selected] : {};
+    let balancer = node.protocol == '_shunt' ? node_id(node.default_node) : selected;
+    // Prefer an existing dedicated SOCKS attached directly to this Balancer.
+    // Shunt can route a probe DIRECT, so main Shunt SOCKS is not certified.
+    if (g.socks_enabled == '1') {
+        let candidates = [];
+        for (let key, n in values)
+            if (type(n) == 'object' && n['.type'] == 'socks' && n.enabled == '1' && n.node == balancer &&
+                !n.autoswitch_backup_node && !n.autoswitch && (n.enable_autoswitch==null || n.enable_autoswitch=='0') &&
+                !n.username && !n.password && port(n.port) &&
+                type(values[balancer]) == 'object' && values[balancer].protocol == '_balancing' && proxy_route(values,balancer,{}))
+                push(candidates, { port: port(n.port), profile: balancer, order: n['.index'] || 0 });
+        sort(candidates, (a,b) => a.order - b.order);
+        if (length(candidates)) return candidates[0];
+    }
+    if (g.enabled == '1' && port(g.node_socks_port) && proxy_route(values,selected,{}))
+        return { port: port(g.node_socks_port), profile: selected };
+    return null;
+}
+export function public_ip(s) {
+    if (type(s) != 'string' || length(s) > 45) return '';
+    let a=ipv4_parts(s);
+    if (a) {
+        let x=a[0], y=a[1], z=a[2];
+        if (max(a[0],a[1],a[2],a[3]) > 255 || x == 0 || x == 10 || x == 127 || x >= 224 ||
+            (x == 100 && y >= 64 && y <= 127) || (x == 169 && y == 254) ||
+            (x == 172 && y >= 16 && y <= 31) || (x == 192 && (y == 168 || (y == 0 && (z == 0 || z == 2)) || (y == 88 && z == 99))) ||
+            (x == 198 && (y == 18 || y == 19 || (y == 51 && z == 100))) || (x == 203 && y == 0 && z == 113)) return '';
+        return s;
+    }
+    // Conservative global IPv6 unicast only; reject embedded IPv4, zone IDs,
+    // transition mechanisms, local/reserved and documentation ranges.
+    let words=ipv6_words(s);if(!words)return '';
+    if (words[0] < 0x2000 || words[0] >= 0x4000 || words[0] == 0x2002 ||
+        (words[0] == 0x2001 && (words[1] < 0x0200 || words[1] == 0x0db8)) ||
+        (words[0] == 0x3fff && words[1] < 0x1000)) return '';
+    let best=-1, bestlen=1;
+    for (let i=0;i<8;i++) {
+        let j=i;while(j<8 && words[j] == 0) j++;
+        if(j-i>bestlen){best=i;bestlen=j-i;} if(j>i)i=j-1;
+    }
+    let printable=map(words,w=>sprintf('%x',w));
+    return best < 0 ? join(':',printable) : join(':',slice(printable,0,best))+'::'+join(':',slice(printable,best+bestlen));
+}
+export function cache_read() {
+    let path='/tmp/proxy-monitor-exit.json', stat=fs.lstat(path);
+    if (!stat || stat.type != 'file' || stat.size > 16384 || stat.uid != 0) return {};
+    try { let d=json(fs.readfile(path,16385)); return type(d) == 'object' && d.version == 1 ? d : {}; } catch(e) { return {}; }
+}
+export function exit_cache() {
+    let d=cache_read(), last=d.last_success, safe=null;
+    if (type(last) == 'object' && public_ip(last.ip) && type(last.checked_at) == 'int' && last.checked_at > 0 &&
+        type(last.route) == 'string' && match(last.route,/^socks5h:\/\/127\.0\.0\.1:[0-9]{1,5} → [A-Za-z0-9_]{1,64}$/)) {
+        let c=type(last.country) == 'object' ? country_info(last.country.code,'geolocation') : country_info('','unknown');
+        safe={ip:public_ip(last.ip),country:c,checked_at:last.checked_at,route:last.route};
+    }
+    let state=index(['OK','CHECK_FAILED','INVALID_RESPONSE','UNAVAILABLE'],d.state)>=0 ? d.state : 'NOT_CHECKED';
+    if(state=='OK' && !safe)state='INVALID_RESPONSE';
+    return { state:state,
+        checked_at:type(d.checked_at) == 'int' ? d.checked_at : null,
+        reason:index(['SOCKS_ROUTE_UNVERIFIED','DEPENDENCY_MISSING','HTTPS_OR_SOCKS_FAILED','BAD_ECHO','NONE'],d.reason)>=0 ? d.reason : 'NONE',
+        geo_state:d.geo_state == 'OK' ? 'OK' : 'UNAVAILABLE', last_success:safe };
+}
+PMDATA
+chmod 0644 "$B/stage/usr/share/ucode/proxy-monitor.uc"
+mkdir -p "$B/stage/usr/libexec"
+cat > "$B/stage/usr/libexec/proxy-monitor-exit-check.uc" <<'PMEXITCODE'
+'use strict';
+import * as fs from 'fs';
+import { configuration, socks_route, country_info, public_ip, cache_read } from 'proxy-monitor';
+// Dynamic optional dependency: syntax validation/install still works without
+// this module. The RPC adapter reports DEPENDENCY_MISSING before spawning us.
+const loop=require('uloop');
+
+const cache_path='/tmp/proxy-monitor-exit.json';
+const lock_path='/tmp/proxy-monitor-exit.lock';
+// mkdir is atomic; no background polling. A crashed bounded check expires.
+let lock=fs.lstat(lock_path);
+if (lock && lock.type == 'directory' && time()-lock.mtime > 30) fs.rmdir(lock_path);
+if (!fs.mkdir(lock_path,0700)) exit(0);
+if (fs.lstat('/tmp/proxy-monitor-v15-install.lock')) { fs.rmdir(lock_path); exit(0); }
+let work=fs.mkdtemp('/tmp/proxy-monitor-exit-XXXXXX');
+if (!work) { fs.rmdir(lock_path); exit(1); }
+let previous=cache_read();
+let now=time();
+function finish(state,reason,geo_state,last,geos) {
+    let result={version:1,state:state,reason:reason,checked_at:now,geo_state:geo_state,
+        last_success:last || previous.last_success || null,geo_cache:geos || previous.geo_cache || {}};
+    let raw=sprintf('%J\n',result);
+    if (length(raw) <= 16384 && fs.writefile(work+'/cache',raw) != null) {
+        fs.chmod(work+'/cache',0600);fs.rename(work+'/cache',cache_path);
+    }
+}
+function bounded_json(path) {
+    let s=fs.lstat(path);
+    if(!s || s.type != 'file' || s.size > 4096) return {};
+    try { let d=json(fs.readfile(path,4097)); return type(d)=='object' ? d : {}; } catch(e) { return {}; }
+}
+function https(route,url) {
+    let result=-1;
+    let child=loop.process('/usr/bin/curl',[
+        '--disable','--silent','--fail','--proto','=https','--tlsv1.2',
+        '--connect-timeout','2','--max-time','5','--max-filesize','4096',
+        '--proxy','socks5h://127.0.0.1:'+route.port,'--noproxy','',
+        '--output',work+'/response',url
+    ],{PATH:'/usr/sbin:/usr/bin:/sbin:/bin',LC_ALL:'C'},code=>{result=code;loop.end();});
+    if (!child) return null;
+    loop.run();
+    let response=result==0 ? bounded_json(work+'/response') : null;
+    fs.unlink(work+'/response');return response;
+}
+function check() {
+    // Limit manual repeats as well as concurrent browser tabs.
+    if (type(previous.checked_at)=='int' && now-previous.checked_at>=0 && now-previous.checked_at<15) return;
+    let route=socks_route(configuration());
+    if (!route) {finish('UNAVAILABLE','SOCKS_ROUTE_UNVERIFIED','UNAVAILABLE');return;}
+    if (!fs.access('/usr/bin/curl','x')) {finish('UNAVAILABLE','DEPENDENCY_MISSING','UNAVAILABLE');return;}
+    let echo=https(route,'https://api64.ipify.org?format=json');
+    if (echo==null) {finish('CHECK_FAILED','HTTPS_OR_SOCKS_FAILED','UNAVAILABLE');return;}
+    let ip=public_ip(echo.ip);
+    if (!ip) {finish('INVALID_RESPONSE','BAD_ECHO','UNAVAILABLE');return;}
+    let geos=type(previous.geo_cache)=='object' ? previous.geo_cache : {};
+    let entry=type(geos[ip])=='object' ? geos[ip] : {};
+    let c=type(entry.country)=='object' ? country_info(entry.country.code,'geolocation') : country_info('','unknown');
+    // Positive results last for this boot/cache. Failed lookups have a 5-minute
+    // negative cache; retry only on a later explicitly requested check.
+    if (!c.code && !(type(entry.lookup_at)=='int' && now-entry.lookup_at>=0 && now-entry.lookup_at<300)) {
+        let geo=https(route,'https://ipwho.is/'+ip+'?fields=success,ip,country,country_code');
+        if (geo && geo.success==true && public_ip(geo.ip)==ip)
+            c=country_info(geo.country_code,'geolocation');
+        geos[ip]={country:c,lookup_at:now};
+    }
+    // A small bounded LRU-like geolocation cache accommodates alternating exits.
+    while(length(keys(geos))>16) {
+        let oldest=null;
+        for(let key,val in geos) if(key!=ip && (oldest==null || val.lookup_at < geos[oldest].lookup_at)) oldest=key;
+        if(oldest==null)break;delete geos[oldest];
+    }
+    finish('OK','NONE',c.code ? 'OK' : 'UNAVAILABLE',{
+        ip:ip,country:c,checked_at:time(),route:'socks5h://127.0.0.1:'+route.port+' → '+route.profile
+    },geos);
+}
+loop.init();
+try { check(); } catch(e) { finish('CHECK_FAILED','HTTPS_OR_SOCKS_FAILED','UNAVAILABLE'); }
+loop.done();
+fs.unlink(work+'/response');fs.unlink(work+'/cache');fs.rmdir(work);fs.rmdir(lock_path);
+PMEXITCODE
+chmod 0644 "$B/stage/usr/libexec/proxy-monitor-exit-check.uc"
+mkdir -p "$B/stage/usr/libexec"
+cat > "$B/stage/usr/libexec/proxy-monitor-exit" <<'PMEXITSH'
+#!/bin/sh
+# One manual check, never a daemon. Bound every child output file (32 KiB).
+umask 077
+ulimit -f 32 || exit 1
+exec /usr/bin/ucode /usr/libexec/proxy-monitor-exit-check.uc
+PMEXITSH
+chmod 0755 "$B/stage/usr/libexec/proxy-monitor-exit"
 mkdir -p "$B/stage/usr/libexec"
 cat > "$B/stage/usr/libexec/proxy-monitor-status" <<'UCODE'
 #!/usr/bin/ucode
 'use strict';
 import * as fs from 'fs';
 import { cursor } from 'uci';
+import { country, display_label, exit_cache, members } from 'proxy-monitor';
 
 // Only fixed local commands. UCI values are never shell arguments.
 function command(cmd) {
@@ -130,8 +702,7 @@ function object(raw) {
 function id(s) { return type(s) == 'string' && match(s, /^[A-Za-z0-9_]{1,64}$/) ? s : ''; }
 function label(s, fallback) {
     // Remarks are display metadata, never URLs, credentials or configuration dumps.
-    if (type(s) != 'string' || length(s) > 96 || match(s, /[[:cntrl:]:\/@=]/)) return fallback;
-    return s || fallback;
+    return display_label(s, fallback);
 }
 function enum_value(s, allowed) { return index(allowed, s) >= 0 ? s : 'UNKNOWN'; }
 function flag(s) { return s == '1' ? true : s == '0' ? false : null; }
@@ -161,6 +732,19 @@ let protocol = enum_value(node.protocol, ['_shunt', '_balancing', '_iface', 'vle
 let candidate = protocol == '_shunt' ? id(node.default_node) : protocol == '_balancing' ? selected : '';
 let balancer = type(values[candidate]) == 'object' && values[candidate].protocol == '_balancing' ? candidate : '';
 let balance = balancer ? values[balancer] : {};
+let configured_nodes = [], seen_nodes = {};
+let selection = members(balance,values);
+let nodes_supported = selection.supported;
+for (let reference in selection.ids) {
+    let nid = id(reference);
+    if (!nid || seen_nodes[nid]) continue;
+    seen_nodes[nid] = true;
+    if (length(configured_nodes) >= 128) continue;
+    let n = type(values[nid]) == 'object' ? values[nid] : {};
+    let name = label(n.remarks, nid);
+    push(configured_nodes, { id:nid, name:name, group:display_label(n.group, '',512),
+        country:country(n,name), available:n['.type'] == 'nodes', observation:'configured' });
+}
 let core = enum_value(node.type, ['Xray', 'Sing-Box', 'sing-box']);
 
 // One /proc scan per request; no stored PID, probing or continuous collector.
@@ -239,9 +823,13 @@ let result = {
     led_state: led, led_service_running: service_running('internet-led-status'),
     shared_health: health_state, shared_health_age: age,
     last_recovery_event: event,
+    balancer_nodes: configured_nodes,
+    balancer_nodes_supported: nodes_supported,
+    balancer_nodes_truncated: length(keys(seen_nodes)) > length(configured_nodes),
+    proxy_exit: exit_cache(),
     // Legacy Android 2.11 fields: unknown observations remain empty, never invented.
     selected_remark: label(node.remarks, selected), public_ip: '', country_code: '',
-    expected_nodes: 0, active_nodes: [], balancers: []
+    expected_nodes: length(keys(seen_nodes)), active_nodes: [], balancers: []
 };
 if (ARGV[0] == '--mobile')
     printf('%J\n', { api_version: 7, status: result,
@@ -256,6 +844,9 @@ cat > "$B/stage/www/luci-static/resources/view/status/include/00_proxy-monitor.j
 'require rpc';
 
 var callStatus = rpc.declare({ object: 'proxy-monitor', method: 'status', expect: { '': {} } });
+var callExitRefresh = rpc.declare({ object: 'proxy-monitor', method: 'exit_refresh', expect: { '': {} } });
+var exitChecking = false;
+var isoCodes = 'AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW';
 var cachedStatus = {}, lastRefresh = -Infinity, inFlight = null;
 function fetchStatus(force) {
     if (inFlight) return inFlight;
@@ -272,8 +863,8 @@ function state(value, yes, no) {
         typeof value === 'boolean' ? (value ? yes : no) : _('UNKNOWN')
     ]);
 }
-function text(value) {
-    return typeof value === 'string' && value.length && value.length <= 128 ? value : _('UNKNOWN');
+function text(value, limit) {
+    return typeof value === 'string' && value.length && value.length <= (limit || 1024) ? value : _('UNKNOWN');
 }
 function field(label, value, technical) {
     return E('div', { 'class': 'pm-field' }, [
@@ -281,8 +872,61 @@ function field(label, value, technical) {
         E('span', { 'class': 'pm-value', 'dir': technical ? 'ltr' : 'auto' }, [value == null ? _('UNKNOWN') : value])
     ]);
 }
-function card(title, items) {
-    return E('section', { 'class': 'cbi-section pm-card' }, [E('h3', {}, [title]), E('div', {}, items)]);
+function card(title, items, id) {
+    var attrs = { 'class': 'cbi-section pm-card' };
+    if (id) attrs.id = id;
+    return E('section', attrs, [E('h3', {}, [title]), E('div', {}, items)]);
+}
+function countryText(c) {
+    c = c && typeof c === 'object' ? c : {};
+    var code = typeof c.code === 'string' && /^[A-Z]{2}$/.test(c.code) && (' ' + isoCodes + ' ').indexOf(' ' + c.code + ' ') >= 0 ? c.code : '';
+    var flag = code ? String.fromCodePoint(0x1f1e6 + code.charCodeAt(0) - 65, 0x1f1e6 + code.charCodeAt(1) - 65) : '🌐';
+    return E('span', { 'dir': 'auto' }, [ flag + ' ' + (code ? text(c.name,128) + ' (' + code + ')' : _('UNKNOWN')),
+        c.source === 'inferred' ? ' — ' + _('inferred from node name') : c.source === 'metadata' ? ' — ' + _('configured server country') : '' ]);
+}
+function balancerNodes(d) {
+    var nodes = Array.isArray(d.balancer_nodes) ? d.balancer_nodes.slice(0,128) : [];
+    var rows = nodes.map(function(n) {
+        n = n && typeof n === 'object' ? n : {};
+        return E('div', { 'class': 'pm-node' }, [
+            E('strong', { 'dir': 'auto' }, [text(n.name)]),
+            E('div', { 'dir': 'auto' }, [ _('Subscription group') + ': ' + text(n.group,512) ]),
+            E('div', {}, [countryText(n.country)]),
+            n.available === false ? E('span', { 'class': 'pm-badge' }, [_('UNAVAILABLE')]) : ''
+        ]);
+    });
+    return card(_('Active Balancer Nodes'), [
+        E('p', {}, [_('Configured members; the exact node serving a connection is not observable.')]),
+        E('div', {}, rows.length ? rows : [_('UNKNOWN / no configured members available')]),
+        d.balancer_nodes_supported === false ? E('p', {}, [_('UNAVAILABLE: unsupported node-selection schema')]) : '',
+        d.balancer_nodes_truncated === true ? E('p', {}, [_('List limited to 128 members')]) : ''
+    ], 'proxy-monitor-nodes');
+}
+function checkTime(value) {
+    return typeof value === 'number' && Number.isInteger(value) && value > 0 ? new Date(value * 1000).toLocaleString() : _('UNKNOWN');
+}
+function exitCard(d, refreshExit) {
+    var x = d.proxy_exit && typeof d.proxy_exit === 'object' ? d.proxy_exit : {};
+    var last = x.last_success && typeof x.last_success === 'object' ? x.last_success : {};
+    var states = { OK: _('Successful last check'), CHECK_FAILED: _('Last check failed'),
+        INVALID_RESPONSE: _('Invalid IP response'), UNAVAILABLE: _('UNAVAILABLE'), NOT_CHECKED: _('Not checked'), CHECKING: _('Checking') };
+    var reasons = { SOCKS_ROUTE_UNVERIFIED: _('No existing SOCKS route proven to avoid DIRECT; a Shunt or direct fallback cannot certify a proxy exit.'),
+        DEPENDENCY_MISSING: _('Optional curl with HTTPS/SOCKS and ucode-mod-uloop are required for manual checks.'),
+        HTTPS_OR_SOCKS_FAILED: _('HTTPS or SOCKS failed; no direct-WAN fallback was used.'), BAD_ECHO: _('The endpoint did not return a valid global IP address.') };
+    return card(_('Proxy Exit IP'), [
+        E('p', {}, [_('Observed proxy exit IP — last check')]),
+        field(_('Public IPv4 / IPv6'), text(last.ip,45), true),
+        field(_('Exit IP country'), countryText(last.country)),
+        field(_('Last successful check'), checkTime(last.checked_at)),
+        field(_('Connection status'), exitChecking ? states.CHECKING : states[x.state] || _('UNKNOWN')),
+        field(_('Last attempt'), checkTime(x.checked_at)),
+        field(_('Route used for last successful check'), text(last.route,192), true),
+        last.ip && x.geo_state !== 'OK' ? E('p', {}, [_('Country lookup unavailable; the IP check and geolocation are separate.')]) : '',
+        reasons[x.reason] ? E('p', {}, [reasons[x.reason]]) : '',
+        E('button', { 'type': 'button', 'class': 'cbi-button cbi-button-action', 'disabled': exitChecking ? '' : null,
+            'click': function() { return refreshExit(); } }, [_('Check proxy exit IP')]),
+        E('p', { 'class': 'pm-help' }, [_('Manual check only. leastLoad may use different nodes for different connections; this is not a permanent exit or an active-node identification. Cached observations survive failed checks until reboot.')])
+    ], 'proxy-monitor-exit');
 }
 function installStyles() {
     if (document.getElementById('proxy-monitor-theme-style')) return;
@@ -299,15 +943,19 @@ function installStyles() {
         '#proxy-monitor .pm-badge{display:inline-block;font-size:.9em;border:1px solid currentColor;border-radius:.3rem;padding:.1rem .4rem;color:inherit}' +
         '#proxy-monitor .pm-header{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:1rem;margin-bottom:1rem}' +
         '#proxy-monitor .pm-help{margin-top:1rem;line-height:1.6}' +
+        '#proxy-monitor .pm-node{padding:.65rem 0;border-bottom:1px solid var(--border-color-low,rgba(127,127,127,.3));line-height:1.7;unicode-bidi:isolate}' +
+        '#proxy-monitor .pm-node:last-child{border-bottom:0}' +
+        '#proxy-monitor-nodes{grid-column:1/-1}' +
         '@media(max-width:600px){#proxy-monitor .pm-grid{grid-template-columns:minmax(0,1fr)}#proxy-monitor .pm-field{flex-wrap:wrap;gap:.3rem}#proxy-monitor .pm-value{max-width:100%}}'
     ]));
 }
-function panel(d) {
+function panel(d, refreshExit) {
     d = d || {};
     var enabled = state(d.passwall_enabled, _('Enabled in UCI'), _('Disabled in UCI'));
     var sing = state(d.singbox_running, _('Running'), d.singbox_installed === true ? _('Inactive / standby') : _('UNAVAILABLE'));
     var xray = state(d.xray_running, _('Running'), d.xray_installed === true ? _('Stopped / inactive') : _('UNAVAILABLE'));
     return E('div', { 'class': 'pm-grid' }, [
+        balancerNodes(d), exitCard(d, refreshExit),
         card(_('Proxy services'), [
             field('Passwall2', enabled, true), field(_('Passwall2 procd instance'), state(d.passwall_running, _('Running'), _('Stopped')), true),
             field('Xray', xray, true), field('sing-box', sing, true),
@@ -349,21 +997,32 @@ return baseclass.extend({
         if (this.content) { this.update(d); return this.content; }
         var self = this;
         this.lastData = d;
-        var body = E('div', { 'id': 'proxy-monitor-panel' }, [panel(d)]);
+        var body = E('div', { 'id': 'proxy-monitor-panel' }, [panel(d, refreshExit)]);
         var content = E('div', { 'id': 'proxy-monitor' }, [
             E('div', { 'class': 'pm-header' }, [
                 E('button', { 'type': 'button', 'class': 'cbi-button cbi-button-action', 'click': function() { return refresh(); } }, [_('Refresh status')])]),
             body,
-            E('p', { 'class': 'pm-help' }, [_('Local read-only indicators; configuration and process presence do not prove connectivity. Shared health is published by the existing watchdog. No traffic sampling or connectivity probes. Automatic refresh: 30 seconds while visible.')])
+            E('p', { 'class': 'pm-help' }, [_('Local read-only indicators; configuration and process presence do not prove connectivity. Shared health is published by the existing watchdog. No traffic sampling or automatic connectivity probes. Status refresh: 30 seconds while visible; external IP checks require the separate manual button.')])
         ]);
         this.update = function(result) {
             if (self.lastData === result) return;
             self.lastData = result;
             while (body.firstChild) body.removeChild(body.firstChild);
-            body.appendChild(panel(result));
+            body.appendChild(panel(result, refreshExit));
         };
         function refresh() {
             return fetchStatus(true).then(function(result) { self.update(result); });
+        }
+        function refreshExit() {
+            if (exitChecking) return Promise.resolve();
+            exitChecking = true;
+            self.lastData = null; self.update(cachedStatus);
+            return callExitRefresh().then(function(result) {
+                var x = result && result.proxy_exit && typeof result.proxy_exit === 'object' ? result.proxy_exit : { state: 'CHECK_FAILED' };
+                cachedStatus = Object.assign({}, cachedStatus, {proxy_exit:x});
+            }).catch(function() {
+                cachedStatus = Object.assign({}, cachedStatus, {proxy_exit:Object.assign({}, cachedStatus.proxy_exit || {}, {state:'CHECK_FAILED'})});
+            }).finally(function() { exitChecking = false; self.lastData = null; self.update(cachedStatus); });
         }
         this.content = content;
         return content;
@@ -375,6 +1034,9 @@ mkdir -p "$B/stage/usr/share/rpcd/ucode"
 cat > "$B/stage/usr/share/rpcd/ucode/proxy-monitor" <<'RPCPLUGIN'
 'use strict';
 import * as fs from 'fs';
+import { exit_cache } from 'proxy-monitor';
+let loop=null, checking=false;
+try { loop=require('uloop'); } catch(e) {}
 
 // Native rpcd-mod-ucode loader contract: explicit ubus object + method name.
 // The helper reads UCI natively, avoiding a recursive call into this same rpcd.
@@ -385,17 +1047,38 @@ return {
             call: function() {
                 let p = fs.popen('/usr/libexec/proxy-monitor-status', 'r');
                 if (!p) return {};
-                let raw = p.read(65536) || '';
+                let raw = p.read(262144) || '';
                 let rc = p.close();
                 if (rc != 0) return {};
                 try {
                     let d = json(raw);
                     if (type(d) != 'object' || d.backend_version != 15) return {};
                     d.rpc_backend = 'ucode';
-                    d.rpc_revision = 2;
+                    d.rpc_revision = 3;
                     return d;
                 }
                 catch (e) { return {}; }
+            }
+        },
+        // Authenticated, argument-free manual HTTPS reads; no proxy setting
+        // changes. Deferred process keeps rpcd/session/other LuCI RPC responsive.
+        exit_refresh: {
+            args: {},
+            call: function(request) {
+                if (!loop || !fs.access('/usr/bin/curl','x')) {
+                    let d=exit_cache();d.state='UNAVAILABLE';d.reason='DEPENDENCY_MISSING';
+                    return {proxy_exit:d};
+                }
+                if (checking) {let d=exit_cache();d.state='CHECKING';return {proxy_exit:d};}
+                checking=true;
+                let child=loop.process('/usr/libexec/proxy-monitor-exit',[],null,function(code) {
+                    checking=false;
+                    let d=exit_cache();
+                    if(code!=0){d.state='CHECK_FAILED';d.reason='HTTPS_OR_SOCKS_FAILED';}
+                    request.reply({proxy_exit:d});
+                });
+                if(!child){checking=false;return {proxy_exit:{state:'UNAVAILABLE',reason:'DEPENDENCY_MISSING'}};}
+                return request.defer();
             }
         }
     }
@@ -410,7 +1093,8 @@ cat > "$B/stage/usr/share/rpcd/acl.d/luci-app-proxy-monitor.json" <<'JSONACL'
     "read": {
       "ubus": {
         "proxy-monitor": [
-          "status"
+          "status",
+          "exit_refresh"
         ]
       }
     }
@@ -451,12 +1135,14 @@ JSONMOBILE
 chmod 0755 "$B/stage/www/cgi-bin/proxy-monitor-mobile"
 
 # Compile and execute the staged backend before any production writes.
-ucode -c -o "$B/stage/backend.ucb" "$B/stage/usr/libexec/proxy-monitor-status"
-ucode -c -o "$B/stage/rpc-plugin.ucb" "$B/stage/usr/share/rpcd/ucode/proxy-monitor"
-ucode -e 'import * as fs from "fs"; let d=loadstring(fs.stdin.read("all"))(); exit(type(d["proxy-monitor"].status.call) == "function" ? 0 : 1);' < "$B/stage/usr/share/rpcd/ucode/proxy-monitor"
-ucode "$B/stage/usr/libexec/proxy-monitor-status" > "$B/stage/status.json"
+ucode -L "$B/stage/usr/share/ucode/*.uc" -c -o "$B/stage/data.ucb" -e 'import * as data from "proxy-monitor";'
+ucode -L "$B/stage/usr/share/ucode/*.uc" -c -o "$B/stage/exit.ucb" "$B/stage/usr/libexec/proxy-monitor-exit-check.uc"
+ucode -L "$B/stage/usr/share/ucode/*.uc" -c -o "$B/stage/backend.ucb" "$B/stage/usr/libexec/proxy-monitor-status"
+ucode -L "$B/stage/usr/share/ucode/*.uc" -c -o "$B/stage/rpc-plugin.ucb" "$B/stage/usr/share/rpcd/ucode/proxy-monitor"
+ucode -L "$B/stage/usr/share/ucode/*.uc" -e 'import * as fs from "fs"; let d=loadstring(fs.stdin.read("all"))(); exit(type(d["proxy-monitor"].status.call) == "function" && type(d["proxy-monitor"].exit_refresh.call) == "function" ? 0 : 1);' < "$B/stage/usr/share/rpcd/ucode/proxy-monitor"
+ucode -L "$B/stage/usr/share/ucode/*.uc" "$B/stage/usr/libexec/proxy-monitor-status" > "$B/stage/status.json"
 ucode -e 'import * as fs from "fs"; let d=json(fs.stdin.read("all")); exit(d.backend_version == 15 && type(d.active_nodes) == "array" ? 0 : 1);' < "$B/stage/status.json"
-ucode "$B/stage/usr/libexec/proxy-monitor-status" --mobile > "$B/stage/mobile.json"
+ucode -L "$B/stage/usr/share/ucode/*.uc" "$B/stage/usr/libexec/proxy-monitor-status" --mobile > "$B/stage/mobile.json"
 ucode -e 'import * as fs from "fs"; let d=json(fs.stdin.read("all")); exit(d.api_version == 7 && d.traffic.available == false ? 0 : 1);' < "$B/stage/mobile.json"
 for p in /usr/share/rpcd/acl.d/luci-app-proxy-monitor.json; do
     ucode -e 'import * as fs from "fs"; exit(type(json(fs.stdin.read("all"))) == "object" ? 0 : 1);' < "$B/stage$p"
@@ -506,7 +1192,7 @@ rm -rf /tmp/luci-modulecache
 attempt=0
 while :; do
     if /bin/ubus -t 2 call proxy-monitor status > "$B/stage/rpc-status.json" 2> "$B/stage/rpc-error.txt" &&
-       ucode -e 'import * as fs from "fs"; try { let d=json(fs.stdin.read("all")); exit(d.backend_version == 15 && d.rpc_backend == "ucode" && d.rpc_revision == 2 ? 0 : 1); } catch(e) { exit(1); }' < "$B/stage/rpc-status.json"; then
+       ucode -e 'import * as fs from "fs"; try { let d=json(fs.stdin.read("all")); exit(d.backend_version == 15 && d.rpc_backend == "ucode" && d.rpc_revision == 3 ? 0 : 1); } catch(e) { exit(1); }' < "$B/stage/rpc-status.json"; then
         break
     fi
     attempt=$((attempt + 1))

@@ -15,18 +15,23 @@ html='''<!doctype html><html lang="fa" dir="rtl"><meta charset="utf-8"><meta nam
 <div><button id="dark">Dark / Light</button><button id="partial">Partial JSON</button><button id="healthy">Healthy fixture</button><button id="check">Run checks</button></div>
 <pre id="checks">Not run</pre><div id="surface"></div></main><script>
 const sample={backend_version:15,passwall_enabled:true,passwall_running:true,xray_running:true,xray_installed:true,singbox_running:false,singbox_installed:true,selected_name:'مسیر ایران',selected_type:'Xray',shunt_id:'iran_auto_shunt',balancer_id:'29dn9fUB',balancer_strategy:'leastLoad',iran_direct:true,private_direct:true,encrypted_dns_process:true,smartdns_process:true,dnsmasq_process:true,watchdog_active:true,resilience_mode:'normal',failure_count:0,led_state:'green',shared_health:'healthy',last_recovery_event:'recovered'};
-let data=sample,requests=0,registered=[],clock=100000;
+sample.balancer_nodes=[{id:'de',name:'🇩🇪 Germany Premium / نام کامل نود — Frankfurt 01',group:'اشتراک اصلی / گروه اروپا',available:true,country:{code:'DE',name:'Germany',source:'inferred'}},{id:'jp',name:'Tokyo Premium 02',group:'اشتراک دوم',available:true,country:{code:'JP',name:'Japan',source:'metadata'}},{id:'unknown',name:'نام کامل نود با کشور نامشخص و متن بلند برای بررسی چیدمان موبایل',group:'گروه سوم',available:true,country:{code:'',name:'',source:'unknown'}}];
+sample.proxy_exit={state:'OK',checked_at:1700000000,geo_state:'OK',last_success:{ip:'8.8.4.4',country:{code:'US',name:'United States',source:'geolocation'},checked_at:1700000000,route:'socks5h://127.0.0.1:1081 → 29dn9fUB'}};
+let data=sample,requests=0,exitRequests=0,registered=[],clock=100000;
 Date.now=()=>clock;
 function E(tag,attrs={},children=[]) {
  if(Array.isArray(tag)){const f=document.createDocumentFragment();tag.forEach(x=>f.append(x));return f;}
  if(attrs instanceof Node||Array.isArray(attrs)||typeof attrs==='string'){children=attrs;attrs={};}
  const el=document.createElement(tag);
- Object.entries(attrs||{}).forEach(([k,v])=>typeof v==='function'?el.addEventListener(k,v):el.setAttribute(k,v));
+ Object.entries(attrs||{}).forEach(([k,v])=>{if(v==null||v===false)return;typeof v==='function'?el.addEventListener(k,v):el.setAttribute(k,v)});
  (Array.isArray(children)?children:[children]).forEach(v=>{if(v!=null)el.append(v instanceof Node?v:document.createTextNode(String(v)))});return el;
 }
 const translate=s=>({'Proxy services':'سرویس‌های پروکسی','Routing configuration':'پیکربندی مسیرها','DNS process indicators':'وضعیت پردازش DNS','Recovery and shared health':'بازیابی و سلامت مشترک','Refresh status':'تازه‌سازی وضعیت'}[s]||s);
 const baseclass={extend:v=>v},view={extend:v=>v};
-const rpc={declare:()=>()=>{requests++;return Promise.resolve(data)}};
+const rpc={declare:spec=>()=>{
+ if(spec.method==='exit_refresh'){exitRequests++;return Promise.resolve({proxy_exit:{state:'OK',checked_at:1700000100,geo_state:'OK',last_success:{ip:'2606:4700:4700::1111',country:{code:'AU',name:'Australia',source:'geolocation'},checked_at:1700000100,route:'socks5h://127.0.0.1:1081 → 29dn9fUB'}}})}
+ requests++;return Promise.resolve(data)
+}};
 const poll={add:(f,t)=>{registered.push(f)},remove:f=>{registered=registered.filter(v=>v!==f)}};
 const dom={content:(el,content)=>el.replaceChildren(...(Array.isArray(content)?content:[content]))};
 const network={flushCache:()=>Promise.resolve()};

@@ -22,7 +22,7 @@ build uci -DBUILD_LUA=OFF
 fetch https://github.com/openwrt/ubus.git 414c60a2e29e72c2c4f573bc50ad54aef076d169 ubus
 build ubus -DBUILD_LUA=OFF -DBUILD_EXAMPLES=OFF
 fetch https://github.com/jow-/ucode.git fa288dd9b827045265900d0d25f9d834ffd755bf ucode
-build ucode -DUBUS_SUPPORT=OFF -DUCI_SUPPORT=ON -DRTNL_SUPPORT=OFF -DNL80211_SUPPORT=OFF -DULOOP_SUPPORT=OFF -DZLIB_SUPPORT=OFF -DDIGEST_SUPPORT=OFF -DFFI_SUPPORT=OFF
+build ucode -DUBUS_SUPPORT=OFF -DUCI_SUPPORT=ON -DRTNL_SUPPORT=OFF -DNL80211_SUPPORT=OFF -DULOOP_SUPPORT=ON -DZLIB_SUPPORT=OFF -DDIGEST_SUPPORT=OFF -DFFI_SUPPORT=OFF -DCMAKE_C_FLAGS=-Wno-error=deprecated-declarations
 fetch https://github.com/openwrt/rpcd.git d99f703e4035d03fbcfbada3cb697db346c2b984 rpcd
 # Relocate only filesystem constants of the test build; loader/daemon logic is
 # unmodified. This avoids writes to the runner's real /etc/config or /var/run.

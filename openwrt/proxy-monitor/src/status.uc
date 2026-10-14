@@ -2,6 +2,7 @@
 'use strict';
 import * as fs from 'fs';
 import { cursor } from 'uci';
+import { country, display_label, exit_cache, members } from 'proxy-monitor';
 
 // Only fixed local commands. UCI values are never shell arguments.
 function command(cmd) {
@@ -27,8 +28,7 @@ function object(raw) {
 function id(s) { return type(s) == 'string' && match(s, /^[A-Za-z0-9_]{1,64}$/) ? s : ''; }
 function label(s, fallback) {
     // Remarks are display metadata, never URLs, credentials or configuration dumps.
-    if (type(s) != 'string' || length(s) > 96 || match(s, /[[:cntrl:]:\/@=]/)) return fallback;
-    return s || fallback;
+    return display_label(s, fallback);
 }
 function enum_value(s, allowed) { return index(allowed, s) >= 0 ? s : 'UNKNOWN'; }
 function flag(s) { return s == '1' ? true : s == '0' ? false : null; }
@@ -58,6 +58,19 @@ let protocol = enum_value(node.protocol, ['_shunt', '_balancing', '_iface', 'vle
 let candidate = protocol == '_shunt' ? id(node.default_node) : protocol == '_balancing' ? selected : '';
 let balancer = type(values[candidate]) == 'object' && values[candidate].protocol == '_balancing' ? candidate : '';
 let balance = balancer ? values[balancer] : {};
+let configured_nodes = [], seen_nodes = {};
+let selection = members(balance,values);
+let nodes_supported = selection.supported;
+for (let reference in selection.ids) {
+    let nid = id(reference);
+    if (!nid || seen_nodes[nid]) continue;
+    seen_nodes[nid] = true;
+    if (length(configured_nodes) >= 128) continue;
+    let n = type(values[nid]) == 'object' ? values[nid] : {};
+    let name = label(n.remarks, nid);
+    push(configured_nodes, { id:nid, name:name, group:display_label(n.group, '',512),
+        country:country(n,name), available:n['.type'] == 'nodes', observation:'configured' });
+}
 let core = enum_value(node.type, ['Xray', 'Sing-Box', 'sing-box']);
 
 // One /proc scan per request; no stored PID, probing or continuous collector.
@@ -136,9 +149,13 @@ let result = {
     led_state: led, led_service_running: service_running('internet-led-status'),
     shared_health: health_state, shared_health_age: age,
     last_recovery_event: event,
+    balancer_nodes: configured_nodes,
+    balancer_nodes_supported: nodes_supported,
+    balancer_nodes_truncated: length(keys(seen_nodes)) > length(configured_nodes),
+    proxy_exit: exit_cache(),
     // Legacy Android 2.11 fields: unknown observations remain empty, never invented.
     selected_remark: label(node.remarks, selected), public_ip: '', country_code: '',
-    expected_nodes: 0, active_nodes: [], balancers: []
+    expected_nodes: length(keys(seen_nodes)), active_nodes: [], balancers: []
 };
 if (ARGV[0] == '--mobile')
     printf('%J\n', { api_version: 7, status: result,

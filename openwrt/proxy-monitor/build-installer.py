@@ -6,16 +6,19 @@ import json
 ROOT = Path(__file__).resolve().parent
 SRC = ROOT / 'src'
 FILES = {
+    '/usr/share/ucode/proxy-monitor.uc': ('data.uc', 'PMDATA', '0644'),
+    '/usr/libexec/proxy-monitor-exit-check.uc': ('exit-check.uc', 'PMEXITCODE', '0644'),
+    '/usr/libexec/proxy-monitor-exit': ('exit-check.sh', 'PMEXITSH', '0755'),
     '/usr/libexec/proxy-monitor-status': ('status.uc', 'UCODE', '0755'),
     '/www/luci-static/resources/view/status/include/00_proxy-monitor.js': ('proxy-monitor.js', 'LUCIJS', '0644'),
     '/usr/share/rpcd/ucode/proxy-monitor': ('rpc-plugin.uc', 'RPCPLUGIN', '0644'),
 }
 acl = {'luci-app-proxy-monitor': {'description': 'Read-only Proxy Monitor status',
-    'read': {'ubus': {'proxy-monitor': ['status']}}}}
+    'read': {'ubus': {'proxy-monitor': ['status', 'exit_refresh']}}}}
 payloads = [(p, (SRC / name).read_text(), mark, mode) for p, (name, mark, mode) in FILES.items()]
 payloads += [('/usr/share/rpcd/acl.d/luci-app-proxy-monitor.json', json.dumps(acl, indent=2)+'\n', 'JSONACL', '0644'),
     ('/www/cgi-bin/proxy-monitor-mobile', (SRC / 'mobile.cgi').read_text(), 'JSONMOBILE', '0755')]
-owned = [p for p, *_ in payloads] + ['/etc/proxy-monitor/mobile-token',
+owned = [p for p, *_ in payloads] + ['/etc/proxy-monitor/mobile-token', '/tmp/proxy-monitor-exit.json',
     '/usr/libexec/rpcd/proxy-monitor',
     '/www/luci-static/resources/view/services/proxy-monitor.js',
     '/usr/share/luci/menu.d/luci-app-proxy-monitor.json',
@@ -59,6 +62,7 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
+[ ! -e /tmp/proxy-monitor-exit.lock ] || { echo 'ERROR: manual exit check busy; retry after it finishes'; exit 1; }
 mkdir -p /root/recovery
 B=$(mktemp -d /root/recovery/proxy-monitor-v15-XXXXXXXX)
 mkdir -p "$B/originals" "$B/stage"
@@ -85,6 +89,7 @@ if [ "${1:-}" != --held-lock ]; then
     mkdir "$LOCK" 2>/dev/null || { echo 'ERROR: installation/rollback lock exists'; exit 1; }
     trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
 fi
+[ ! -e /tmp/proxy-monitor-exit.lock ] || { echo 'ERROR: manual exit check busy; retry rollback after it finishes'; exit 1; }
 check_parents() {
     d=$(dirname "$1")
     while [ "$d" != / ]; do
@@ -117,12 +122,14 @@ for path, data, marker, mode in payloads:
     script += f'mkdir -p "$B/stage{Path(path).parent}"\ncat > "$B/stage{path}" <<\'{marker}\'\n{data}{marker}\nchmod {mode} "$B/stage{path}"\n'
 script += '''
 # Compile and execute the staged backend before any production writes.
-ucode -c -o "$B/stage/backend.ucb" "$B/stage/usr/libexec/proxy-monitor-status"
-ucode -c -o "$B/stage/rpc-plugin.ucb" "$B/stage/usr/share/rpcd/ucode/proxy-monitor"
-ucode -e 'import * as fs from "fs"; let d=loadstring(fs.stdin.read("all"))(); exit(type(d["proxy-monitor"].status.call) == "function" ? 0 : 1);' < "$B/stage/usr/share/rpcd/ucode/proxy-monitor"
-ucode "$B/stage/usr/libexec/proxy-monitor-status" > "$B/stage/status.json"
+ucode -L "$B/stage/usr/share/ucode/*.uc" -c -o "$B/stage/data.ucb" -e 'import * as data from "proxy-monitor";'
+ucode -L "$B/stage/usr/share/ucode/*.uc" -c -o "$B/stage/exit.ucb" "$B/stage/usr/libexec/proxy-monitor-exit-check.uc"
+ucode -L "$B/stage/usr/share/ucode/*.uc" -c -o "$B/stage/backend.ucb" "$B/stage/usr/libexec/proxy-monitor-status"
+ucode -L "$B/stage/usr/share/ucode/*.uc" -c -o "$B/stage/rpc-plugin.ucb" "$B/stage/usr/share/rpcd/ucode/proxy-monitor"
+ucode -L "$B/stage/usr/share/ucode/*.uc" -e 'import * as fs from "fs"; let d=loadstring(fs.stdin.read("all"))(); exit(type(d["proxy-monitor"].status.call) == "function" && type(d["proxy-monitor"].exit_refresh.call) == "function" ? 0 : 1);' < "$B/stage/usr/share/rpcd/ucode/proxy-monitor"
+ucode -L "$B/stage/usr/share/ucode/*.uc" "$B/stage/usr/libexec/proxy-monitor-status" > "$B/stage/status.json"
 ucode -e 'import * as fs from "fs"; let d=json(fs.stdin.read("all")); exit(d.backend_version == 15 && type(d.active_nodes) == "array" ? 0 : 1);' < "$B/stage/status.json"
-ucode "$B/stage/usr/libexec/proxy-monitor-status" --mobile > "$B/stage/mobile.json"
+ucode -L "$B/stage/usr/share/ucode/*.uc" "$B/stage/usr/libexec/proxy-monitor-status" --mobile > "$B/stage/mobile.json"
 ucode -e 'import * as fs from "fs"; let d=json(fs.stdin.read("all")); exit(d.api_version == 7 && d.traffic.available == false ? 0 : 1);' < "$B/stage/mobile.json"
 for p in /usr/share/rpcd/acl.d/luci-app-proxy-monitor.json; do
     ucode -e 'import * as fs from "fs"; exit(type(json(fs.stdin.read("all"))) == "object" ? 0 : 1);' < "$B/stage$p"
@@ -172,7 +179,7 @@ rm -rf /tmp/luci-modulecache
 attempt=0
 while :; do
     if /bin/ubus -t 2 call proxy-monitor status > "$B/stage/rpc-status.json" 2> "$B/stage/rpc-error.txt" &&
-       ucode -e 'import * as fs from "fs"; try { let d=json(fs.stdin.read("all")); exit(d.backend_version == 15 && d.rpc_backend == "ucode" && d.rpc_revision == 2 ? 0 : 1); } catch(e) { exit(1); }' < "$B/stage/rpc-status.json"; then
+       ucode -e 'import * as fs from "fs"; try { let d=json(fs.stdin.read("all")); exit(d.backend_version == 15 && d.rpc_backend == "ucode" && d.rpc_revision == 3 ? 0 : 1); } catch(e) { exit(1); }' < "$B/stage/rpc-status.json"; then
         break
     fi
     attempt=$((attempt + 1))

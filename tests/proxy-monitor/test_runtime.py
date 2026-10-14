@@ -14,7 +14,7 @@ class RouterFixture:
         self.temp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self.temp.name)
         self.env = os.environ.copy()
-        self.prefixes = ['/usr/libexec', '/usr/share/luci', '/usr/share/rpcd', '/usr/lib/rpcd', '/usr/bin', '/usr/sbin',
+        self.prefixes = ['/usr/libexec', '/usr/share/ucode', '/usr/share/luci', '/usr/share/rpcd', '/usr/lib/rpcd', '/usr/bin', '/usr/sbin',
                          '/www', '/root/recovery', '/etc/proxy-monitor', '/etc/crontabs',
                          '/etc/init.d/rpcd', '/var/run', '/proc', '/tmp/luci', '/tmp/proxy-monitor', '/bin/ubus']
         self.put('/usr/bin/ucode', '#!/bin/sh\nexec '+UCODE+' "$@"\n', 0o755)
@@ -58,6 +58,7 @@ if [ -f "ROOT/fail-restart" ]; then rm "ROOT/fail-restart"; exit 1; fi
         self.put('/proc/self/comm', 'ucode\n')
         self.put('/usr/bin/xray', '#!/bin/sh\nexit 0\n', 0o755)
         self.put('/usr/bin/sing-box', '#!/bin/sh\nexit 0\n', 0o755)
+        if (SRC/'data.uc').exists():self.put('/usr/share/ucode/proxy-monitor.uc', self.redirect((SRC/'data.uc').read_text()))
         self.put('/usr/libexec/proxy-monitor-status', self.redirect((SRC/'status.uc').read_text()), 0o755)
 
     def path(self, p): return self.root / p.lstrip('/')
@@ -72,6 +73,7 @@ if [ -f "ROOT/fail-restart" ]; then rm "ROOT/fail-restart"; exit 1; fi
                         lambda m: str(self.root)+m[0], source)
         source = source.replace("'__CRON_COMMAND__'", "'/root/recovery/internet-watchdog.sh'")
         source = source.replace("from 'uci'", "from '"+str(self.root)+"/uci.uc'")
+        source = source.replace("from 'proxy-monitor'", "from '"+str(self.path('/usr/share/ucode/proxy-monitor.uc'))+"'")
         source = source.replace('PATH=/usr/sbin:/usr/bin:/sbin:/bin',
                                 'PATH='+str(self.root)+'/usr/bin:'+str(self.root)+'/bin:'+os.environ['PATH'])
         # PATH was redirected above; replace its generated form too.
@@ -89,7 +91,8 @@ if [ -f "ROOT/fail-restart" ]; then rm "ROOT/fail-restart"; exit 1; fi
         values = {'global': {'.type':'global', '.index':0, 'enabled':'1', 'node':'iran_auto_shunt'},
                   'iran_auto_shunt': {'.type':'nodes', 'protocol':'_shunt', 'type':'Xray', 'remarks':'مسیر ایران',
                                       'default_node':'29dn9fUB', 'Iran':'_direct', 'PrivateIP':'_direct'},
-                  '29dn9fUB': {'.type':'nodes', 'protocol':'_balancing', 'balancingStrategy':'leastLoad'}}
+                  '29dn9fUB': {'.type':'nodes', 'protocol':'_balancing', 'type':'Xray','balancingStrategy':'leastLoad','balancing_node':['default_member']},
+                  'default_member':{'.type':'nodes','type':'Xray','protocol':'vless','address':'example.net','port':'443','remarks':'Default member'}}
         for key, value in overrides.items(): values[key] = value
         self.root.joinpath('config.json').write_text(json.dumps({'values':values}))
         self.root.joinpath('service.json').write_text(json.dumps({'passwall2':{'instances':{'main':{'running':True}}}}))

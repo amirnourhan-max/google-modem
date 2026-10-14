@@ -15,7 +15,7 @@ ssh root@192.168.28.1 "sha256sum /tmp/install-proxy-monitor-v15.sh; sh -n /tmp/i
 
 هش روتر و محلی باید برابر باشند. host key را با fingerprint معتبر تطبیق دهید؛ StrictHostKeyChecking را غیرفعال نکنید. پس از تأیید baseline:
 
-SHA256 نصب‌کنندهٔ اصلاح‌شده: `cb4404f5556276f86ca20c5408839b027b37b916278d2ec04f6483c1e95e4231`.
+SHA256 نصب‌کنندهٔ اصلاح‌شده: `5ec512dcb571c619405cb3bf9d9b379b3c1cbae472b641a68e44f3b0397bb630`.
 
 ```powershell
 ssh root@192.168.28.1 "sh /tmp/install-proxy-monitor-v15.sh"
@@ -26,7 +26,7 @@ ssh root@192.168.28.1 "true"
 
 installer ابتدا snapshot خصوصی با نام یکتا `/root/recovery/proxy-monitor-v15-XXXXXXXX` می‌سازد؛ compile/runtime/JSON checks پیش از نوشتن انجام می‌شوند. هر فایل با rename اتمیک جایگزین می‌شود. خطای میانی یا RPC موجب rollback می‌شود. فقط rpcd restart و cache LuCI refresh می‌شود؛ جلسهٔ LuCI ممکن است ورود مجدد بخواهد. proxy/DNS/watchdog/LED/wireless/network/firewall/uhttpd restart نمی‌شوند.
 
-صفحهٔ **Status → Overview** را در تم واقعی Light/Dark، RTL و موبایل بررسی کنید؛ Proxy Monitor باید **بالای System** باشد و فقط include00 جدید وجود داشته باشد. include75 و منوی Services قبلی حذف می‌شوند؛ هیچ core file LuCI تغییر نمی‌کند. Overview ممکن است سایر بخش‌ها را با چرخهٔ سریع‌تر بخواند؛ درخواست RPC خود مانیتور حدود۳۰ثانیه و تنها در تب visible و بخش باز است. درخواست درحال اجرا ممکن است بعد از مخفی‌شدن تکمیل شود. پاسخ RPC باید `rpc_backend:ucode` و `rpc_revision:2` داشته باشد. سلامت شبکه/SSH را دوباره تأیید کنید.
+صفحهٔ **Status → Overview** را در تم واقعی Light/Dark، RTL و موبایل بررسی کنید؛ Proxy Monitor باید **بالای System** باشد و فقط include00 جدید وجود داشته باشد. include75 و منوی Services قبلی حذف می‌شوند؛ هیچ core file LuCI تغییر نمی‌کند. Overview ممکن است سایر بخش‌ها را با چرخهٔ سریع‌تر بخواند؛ درخواست RPC خود مانیتور حدود۳۰ثانیه و تنها در تب visible و بخش باز است. درخواست درحال اجرا ممکن است بعد از مخفی‌شدن تکمیل شود. پاسخ RPC باید `rpc_backend:ucode` و `rpc_revision:3` داشته باشد. سلامت شبکه/SSH را دوباره تأیید کنید.
 
 خطای قبلی `Not found` در installer بلافاصله بعد از restart بررسی می‌شد؛ نسخهٔ جدید حداکثر۱۰ تلاش با timeout۲ثانیه و فاصله۱ثانیه دارد. این انتظار فقط هنگام نصب است و loop دائمی نیست. اگر ثبت/پاسخ native واقعاً شکست بخورد، snapshot بازمی‌گردد. بعد از rollback نبود object طبیعی است؛ نتیجهٔ مستقیم script.list اثبات ثبت آن در daemon نیست.
 
@@ -49,3 +49,16 @@ sh /root/recovery/proxy-monitor-v15-XXXXXXXX/rollback.sh
 ```
 
 نام واقعی backup را جایگزین کنید. snapshot منتخب فایل‌ها/permissions قبلی و API/collector را برمی‌گرداند و فایل‌های تازه را حذف می‌کند؛ فقط rpcd refresh می‌شود. backup در نصب مجدد بازنویسی نمی‌شود. rollback نیز lock نصب را رعایت می‌کند. قطع برق/SIGKILL ممکن است مانع rollback خودکار شود؛ اسکریپت باقی می‌ماند. اگر lock مانده، ابتدا محلی نبودن عملیات نصب/rollback را تأیید و سپس فقط directory خالی lock را rmdir کنید. v14.3 یا API6 را کورکورانه روی v15 اجرا نکنید.
+
+## بررسی دستی IP خروجی و پرچم‌ها
+
+[قرارداد و محدودیت مسیر](proxy-monitor-v15-exit-flags-fa.md) را بخوانید. پس از نصب، اعضای configured Balancer و دو نوع کشور سرور/IP خروجی را در Overview بررسی کنید. فقط دکمهٔ Check proxy exit IP درخواست خارجی می‌دهد؛ status/Android fresh=1 درخواست خارجی نمی‌دهند. curl با HTTPS/SOCKS و CA معتبر و ucode-mod-uloop برای این دکمه اختیاری لازم‌اند؛ installer package نصب نمی‌کند. با SOCKS اصلی متصل به Shunt یا Balancer بدون عضو معتبر، DIRECT fallback یا auto-switch، کارت IP عمداً UNAVAILABLE است. مانیتور تنظیمات proxy را برای عبور از این محدودیت عوض نمی‌کند. در صورت مسیر مناسب موجود، یک بررسی دستی و سپس بررسی کش IP/کش کشور را انجام دهید؛ شکست بعدی باید آخرین موفقیت و زمانش را حفظ کند.
+
+متد محلی دستی (فقط هنگام مسیر مناسب):
+
+```sh
+ubus -t 15 call proxy-monitor exit_refresh
+ubus call proxy-monitor status
+```
+
+هنگام بررسی دستی، نصب/rollback تا پایان آن متوقف می‌شود؛ snapshot جدید کش قبلی و helperهای جدید را نیز حفظ می‌کند. کش /tmp پس از reboot پاک می‌شود. هیچ upload/download یا collector ترافیک اضافه نشده است.
