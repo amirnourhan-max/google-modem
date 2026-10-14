@@ -1,0 +1,86 @@
+[
+  {
+    "width": 360,
+    "dark": false,
+    "result": "PASS DOM badges preserved\nPASS No horizontal overflow\nPASS Above System via sorted Overview includes\nPASS Only host poll registered\nPASS Technical values LTR\nPASS Scoped stylesheet",
+    "colors": {
+      "fg": "rgb(64, 64, 64)",
+      "bg": "rgb(255, 255, 255)",
+      "opacity": 1,
+      "contrast": 10.368377760269818
+    },
+    "hidden": true,
+    "collapsed": true,
+    "throttle": true
+  },
+  {
+    "width": 360,
+    "dark": true,
+    "result": "PASS DOM badges preserved\nPASS No horizontal overflow\nPASS Above System via sorted Overview includes\nPASS Only host poll registered\nPASS Technical values LTR\nPASS Scoped stylesheet",
+    "colors": {
+      "fg": "rgb(191, 191, 191)",
+      "bg": "rgb(34, 34, 34)",
+      "opacity": 1,
+      "contrast": 8.651933981231174
+    },
+    "hidden": true,
+    "collapsed": true,
+    "throttle": true
+  },
+  {
+    "width": 768,
+    "dark": false,
+    "result": "PASS DOM badges preserved\nPASS No horizontal overflow\nPASS Above System via sorted Overview includes\nPASS Only host poll registered\nPASS Technical values LTR\nPASS Scoped stylesheet",
+    "colors": {
+      "fg": "rgb(64, 64, 64)",
+      "bg": "rgb(255, 255, 255)",
+      "opacity": 1,
+      "contrast": 10.368377760269818
+    },
+    "hidden": true,
+    "collapsed": true,
+    "throttle": true
+  },
+  {
+    "width": 768,
+    "dark": true,
+    "result": "PASS DOM badges preserved\nPASS No horizontal overflow\nPASS Above System via sorted Overview includes\nPASS Only host poll registered\nPASS Technical values LTR\nPASS Scoped stylesheet",
+    "colors": {
+      "fg": "rgb(191, 191, 191)",
+      "bg": "rgb(34, 34, 34)",
+      "opacity": 1,
+      "contrast": 8.651933981231174
+    },
+    "hidden": true,
+    "collapsed": true,
+    "throttle": true
+  },
+  {
+    "width": 1366,
+    "dark": false,
+    "result": "PASS DOM badges preserved\nPASS No horizontal overflow\nPASS Above System via sorted Overview includes\nPASS Only host poll registered\nPASS Technical values LTR\nPASS Scoped stylesheet",
+    "colors": {
+      "fg": "rgb(64, 64, 64)",
+      "bg": "rgb(255, 255, 255)",
+      "opacity": 1,
+      "contrast": 10.368377760269818
+    },
+    "hidden": true,
+    "collapsed": true,
+    "throttle": true
+  },
+  {
+    "width": 1366,
+    "dark": true,
+    "result": "PASS DOM badges preserved\nPASS No horizontal overflow\nPASS Above System via sorted Overview includes\nPASS Only host poll registered\nPASS Technical values LTR\nPASS Scoped stylesheet",
+    "colors": {
+      "fg": "rgb(191, 191, 191)",
+      "bg": "rgb(34, 34, 34)",
+      "opacity": 1,
+      "contrast": 8.651933981231174
+    },
+    "hidden": true,
+    "collapsed": true,
+    "throttle": true
+  }
+]
