@@ -1,13 +1,13 @@
 name: Test Proxy Monitor v15
 on:
-  push:
-    branches: [proxy-monitor-luci-theme-lightweight-v15]
-    paths: ['openwrt/proxy-monitor/**', 'openwrt/mobile-api/**', 'tests/proxy-monitor/**', '.github/workflows/test-proxy-monitor-v15.yml']
   pull_request:
     paths: ['openwrt/proxy-monitor/**', 'openwrt/mobile-api/**', 'tests/proxy-monitor/**', '.github/workflows/test-proxy-monitor-v15.yml']
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: proxy-monitor-v15-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -45,8 +45,6 @@ jobs:
           npm install --no-save playwright@1.62.1
           npx playwright install --with-deps chromium
           node tests/proxy-monitor/browser.mjs /tmp/preview.html
-      - uses: actions/upload-artifact@v4
+      - name: Preserve browser evidence without Actions artifact storage
         if: always()
-        with:
-          name: proxy-monitor-v15-test-results
-          path: test-results/
+        run: python3 tests/proxy-monitor/export-evidence.py

@@ -29,7 +29,7 @@
 
 **آزمایش واقعی:** ۲۱ آزمون محلی با ucode واقعی و filesystem disposable پاس شدند: core/routing، missing Xray، inactive sing-box، UCI خراب/partial/future، executable سفارشی، procfs/procd مفقود/خراب، health تازه/کهنه/خراب، counter۰، cron، secrets، API shape/auth/LAN/GET/malformed، نصب تکراری، snapshot rollback، write/rpcd failure، lock و symlink. shell/JS syntax و ACL/menu JSON نیز بررسی شدند. fixtureها مرزهای ubus/rpcd/procfs را شبیه‌سازی می‌کنند؛ OpenWrt کامل نیستند.
 
-CI اختصاصی ucode+Chromium برای۶حالت Bootstrap Light/Dark/RTL در۳۶۰/۷۶۸/۱۳۶۶ و fallback بدون tokens، contrast، partial JSON و hidden polling اضافه شد. نتیجهٔ نهایی در PR/گزارش تحویل ثبت می‌شود. اجرای اول CI با URL نادرست upstream و اجرای بعد با نبود root در runner شکست خوردند؛ زیرساخت تست اصلاح شد. وجود workflow به‌تنهایی به معنی پاس‌شدن نیست.
+CI اختصاصی ucode+Chromium برای۶حالت Bootstrap Light/Dark/RTL در۳۶۰/۷۶۸/۱۳۶۶ و fallback بدون tokens، contrast، partial JSON و hidden polling اجرا شد. در run38531105768، آزمون‌های shell/runtime/API و browser پاس شدند؛ تنها upload-artifact با خطای صریح quota شکست خورد. ذخیرهٔ شواهد به ZIP دارای SHA256 در job log و گزارش در step summary منتقل شد؛ مجوز CI همچنان contents:read است و test failure مخفی نمی‌شود. اجراهای قبلی با URL نادرست upstream و نبود root در runner شکست خورده بودند؛ هر دو اصلاح شدند. نتیجهٔ workflow نهایی در PR/تحویل ثبت می‌شود.
 
 **نصب:** NOT VERIFIED. SSH از Work با Network is unreachable شکست خورد؛ هیچ فایل یا سرویس روتر تغییر نکرد. پیش از deploy باید سلامت Extreme Internet Resilience، SSH و تم واقعی محلی تأیید شود. دستورات دقیق و rollback در installation-fa.md و دستور کار Codex ویندوز در deployment-local-codex-fa.md هستند.
 
