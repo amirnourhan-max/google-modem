@@ -21,7 +21,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y cmake libjson-c-dev pkg-config
-          git clone https://github.com/openwrt/ucode.git /tmp/ucode-src
+          git clone https://github.com/jow-/ucode.git /tmp/ucode-src
           git -C /tmp/ucode-src checkout fa288dd9b827045265900d0d25f9d834ffd755bf
           cmake -S /tmp/ucode-src -B /tmp/ucode-build -DCMAKE_INSTALL_PREFIX=/tmp/ucode-runtime -DUBUS_SUPPORT=OFF -DUCI_SUPPORT=OFF -DRTNL_SUPPORT=OFF -DNL80211_SUPPORT=OFF -DULOOP_SUPPORT=OFF -DZLIB_SUPPORT=OFF -DDIGEST_SUPPORT=OFF -DFFI_SUPPORT=OFF
           cmake --build /tmp/ucode-build -j2
